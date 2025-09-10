@@ -1,0 +1,8 @@
+# Copy this file to terraform.tfvars and update with your values
+
+subscription_id = "your-subscription-id-here"
+tenant_id = "your-tenant-id-here"
+existing_resource_group = "rg-your-existing-resource-group"
+existing_vm_name = "vm-your-vm-name"
+azure_region = "East US 2"
+environment = "dev"
