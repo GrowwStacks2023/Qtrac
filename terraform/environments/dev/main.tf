@@ -17,25 +17,6 @@ provider "azurerm" {
   tenant_id      = "f1845ecc-10c8-4389-a2d1-e5f8d7326bfd"
 }
 
-# Variables
-variable "environment" {
-  description = "Environment name"
-  type        = string
-  default     = "dev"
-}
-
-variable "location" {
-  description = "Azure region"
-  type        = string
-  default     = "centralindia"
-}
-
-variable "resource_group_name" {
-  description = "Resource group name"
-  type        = string
-  default     = "palash"
-}
-
 # Get current client config
 data "azurerm_client_config" "current" {}
 
@@ -289,32 +270,4 @@ resource "azurerm_linux_virtual_machine" "dev_vm" {
     Project     = "githubtest"
     Purpose     = "n8n-dev"
   }
-}
-
-# Outputs
-output "dev_vm_public_ip" {
-  value = azurerm_public_ip.dev_vm_ip.ip_address
-}
-
-output "dev_vm_name" {
-  value = azurerm_linux_virtual_machine.dev_vm.name
-}
-
-output "dev_storage_account" {
-  value = azurerm_storage_account.dev_storage.name
-}
-
-output "dev_key_vault" {
-  value = azurerm_key_vault.dev_keyvault.name
-}
-
-# SSH connection helper outputs
-output "ssh_connection_command" {
-  value       = "ssh -i ~/.ssh/vm_key azureuser@${azurerm_public_ip.dev_vm_ip.ip_address}"
-  description = "SSH command to connect to the VM (after retrieving private key)"
-}
-
-output "ssh_key_retrieval_command" {
-  value       = "az keyvault secret show --vault-name ${azurerm_key_vault.dev_keyvault.name} --name vm-ssh-private-key --query value -o tsv > ~/.ssh/vm_key && chmod 600 ~/.ssh/vm_key"
-  description = "Command to retrieve SSH private key from Key Vault and set proper permissions"
 }
