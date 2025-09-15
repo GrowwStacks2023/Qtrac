@@ -1,0 +1,181 @@
+name: Test Infrastructure Structure
+
+on:
+  push:
+    paths:
+      - 'deploy-trigger.txt'
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+jobs:
+  detect-environment:
+    runs-on: ubuntu-latest
+    outputs:
+      target-environment: ${{ steps.parse-trigger.outputs.environment }}
+      tf-path: ${{ steps.parse-trigger.outputs.tf-path }}
+      should-deploy: ${{ steps.parse-trigger.outputs.should-deploy }}
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Parse Trigger File
+        id: parse-trigger
+        run: |
+          if [ ! -f deploy-trigger.txt ]; then
+            echo "No trigger file found"
+            echo "should-deploy=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          LATEST_LINE=$(grep -E "^(DEV|TEST|PROD):" deploy-trigger.txt | tail -n 1)
+          
+          if [ -z "$LATEST_LINE" ]; then
+            echo "No valid deployment instruction found"
+            echo "should-deploy=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          TARGET_ENV=$(echo "$LATEST_LINE" | cut -d':' -f1 | tr '[:upper:]' '[:lower:]')
+          
+          case $TARGET_ENV in
+            dev)
+              TF_PATH="terraform/environments/dev"
+              ;;
+            test)
+              TF_PATH="terraform/environments/test"
+              ;;
+            prod)
+              TF_PATH="terraform/environments/prod"
+              ;;
+            *)
+              echo "Invalid environment: $TARGET_ENV"
+              echo "should-deploy=false" >> $GITHUB_OUTPUT
+              exit 0
+              ;;
+          esac
+          
+          echo "Environment: $TARGET_ENV"
+          echo "Terraform Path: $TF_PATH"
+          echo "environment=$TARGET_ENV" >> $GITHUB_OUTPUT
+          echo "tf-path=$TF_PATH" >> $GITHUB_OUTPUT
+          echo "should-deploy=true" >> $GITHUB_OUTPUT
+
+  validate-structure:
+    needs: detect-environment
+    runs-on: ubuntu-latest
+    if: needs.detect-environment.outputs.should-deploy == 'true'
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Check File Structure
+        run: |
+          echo "Checking Terraform file structure..."
+          
+          TF_PATH="${{ needs.detect-environment.outputs.tf-path }}"
+          
+          # Check required files exist
+          if [ ! -f "$TF_PATH/main.tf" ]; then
+            echo "❌ Missing main.tf in $TF_PATH"
+            exit 1
+          fi
+          
+          if [ ! -f "$TF_PATH/variables.tf" ]; then
+            echo "❌ Missing variables.tf in $TF_PATH"
+            exit 1
+          fi
+          
+          if [ ! -f "$TF_PATH/terraform.tfvars" ]; then
+            echo "❌ Missing terraform.tfvars in $TF_PATH"
+            exit 1
+          fi
+          
+          echo "✅ All required files found in $TF_PATH"
+
+      - name: Validate Terraform Syntax
+        run: |
+          TF_PATH="${{ needs.detect-environment.outputs.tf-path }}"
+          
+          # Setup Terraform
+          curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+          sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
+          sudo apt-get update && sudo apt-get install terraform=1.5.0-1 -y
+          
+          cd $TF_PATH
+          
+          echo "Validating Terraform syntax..."
+          terraform fmt -check -diff
+          terraform validate
+
+  terraform-plan-only:
+    needs: [detect-environment, validate-structure]
+    runs-on: ubuntu-latest
+    if: needs.detect-environment.outputs.should-deploy == 'true'
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Azure CLI Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Terraform Init
+        working-directory: ${{ needs.detect-environment.outputs.tf-path }}
+        run: |
+          terraform init
+          echo "✅ Terraform initialized successfully"
+
+      - name: Terraform Plan (Dry Run)
+        working-directory: ${{ needs.detect-environment.outputs.tf-path }}
+        run: |
+          terraform plan -out=test-plan
+          echo "✅ Terraform plan completed successfully"
+
+      - name: Display Plan Summary
+        working-directory: ${{ needs.detect-environment.outputs.tf-path }}
+        run: |
+          echo "## ��� Terraform Plan Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ needs.detect-environment.outputs.target-environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** Plan Successful ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Structure Validation:" >> $GITHUB_STEP_SUMMARY
+          echo "- main.tf ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- variables.tf ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- terraform.tfvars ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- Terraform syntax ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- Azure authentication ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "��� **Ready for actual deployment!**" >> $GITHUB_STEP_SUMMARY
+
+  test-failed:
+    needs: [detect-environment, validate-structure, terraform-plan-only]
+    runs-on: ubuntu-latest
+    if: failure()
+    
+    steps:
+      - name: Test Failed Notification
+        run: |
+          echo "❌ **Infrastructure Test Failed**" >> $GITHUB_STEP_SUMMARY
+          echo "Check the workflow logs for details on what needs to be fixed." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Common Issues:" >> $GITHUB_STEP_SUMMARY
+          echo "- Missing terraform files" >> $GITHUB_STEP_SUMMARY
+          echo "- Terraform syntax errors" >> $GITHUB_STEP_SUMMARY
+          echo "- Azure authentication problems" >> $GITHUB_STEP_SUMMARY
+          echo "- Invalid environment in deploy-trigger.txt" >> $GITHUB_STEP_SUMMARY
