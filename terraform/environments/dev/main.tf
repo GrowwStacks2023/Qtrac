@@ -236,11 +236,11 @@ resource "azurerm_key_vault_secret" "vm_ssh_public_key" {
 
 # Virtual Machine for Dev (uses generated public key)
 resource "azurerm_linux_virtual_machine" "dev_vm" {
-  name                = "githubtest1-vm"
+  name                = "${var.project_name}-${var.environment}-vm"
   location            = var.location
   resource_group_name = data.azurerm_resource_group.main.name
-  size                = "Standard_D2als_v5"
-  admin_username      = "azureuser"
+  size                = var.vm_size
+  admin_username      = var.admin_username
 
   disable_password_authentication = true
 
@@ -249,7 +249,7 @@ resource "azurerm_linux_virtual_machine" "dev_vm" {
   ]
 
   admin_ssh_key {
-    username   = "azureuser"
+    username   = var.admin_username
     public_key = tls_private_key.vm_ssh.public_key_openssh
   }
 
@@ -265,9 +265,9 @@ resource "azurerm_linux_virtual_machine" "dev_vm" {
     version   = "latest"
   }
 
-  tags = {
+  tags = merge(var.common_tags, {
     Environment = var.environment
-    Project     = "githubtest"
     Purpose     = "n8n-dev"
-  }
+    Name        = "${var.project_name}-${var.environment}-vm"
+  })
 }
