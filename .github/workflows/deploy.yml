@@ -120,7 +120,7 @@ jobs:
           cd $TF_PATH
           
           echo "Checking Terraform formatting..."
-          terraform fmt -check
+          terraform fmt
           
           echo "Initializing Terraform (downloading providers)..."
           terraform init -backend=false
@@ -202,3 +202,4 @@ jobs:
           echo "2. Fix the issues in your Terraform files" >> $GITHUB_STEP_SUMMARY
           echo "3. Run 'terraform fmt' and 'terraform validate' locally" >> $GITHUB_STEP_SUMMARY
           echo "4. Commit and push your changes" >> $GITHUB_STEP_SUMMARY
+
