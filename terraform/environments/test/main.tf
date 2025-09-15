@@ -1,6 +1,3 @@
-# terraform/environments/test/main.tf
-# Test Environment Resources (with generated SSH keys stored in Key Vault)
-
 terraform {
   required_providers {
     azurerm = {
@@ -323,3 +320,4 @@ output "ssh_key_retrieval_command" {
   value       = "az keyvault secret show --vault-name ${azurerm_key_vault.test_keyvault.name} --name vm-ssh-private-key --query value -o tsv > ~/.ssh/vm_key && chmod 600 ~/.ssh/vm_key"
   description = "Command to retrieve SSH private key from Key Vault and set proper permissions"
 }
+
