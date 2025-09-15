@@ -1,4 +1,4 @@
-name: Test Infrastructure Structure
+name: Test Infrastructure
 
 on:
   push:
@@ -108,7 +108,7 @@ jobs:
           # Setup Terraform
           curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
           sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
-          sudo apt-get update && sudo apt-get install terraform=1.5.0-1 -y
+          sudo apt-get update && sudo apt-get install terraform=1.5.0-1
           
           cd $TF_PATH
           
@@ -150,7 +150,7 @@ jobs:
       - name: Display Plan Summary
         working-directory: ${{ needs.detect-environment.outputs.tf-path }}
         run: |
-          echo "## í³‹ Terraform Plan Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "## ðŸ“‹ Terraform Plan Test Results" >> $GITHUB_STEP_SUMMARY
           echo "**Environment:** ${{ needs.detect-environment.outputs.target-environment }}" >> $GITHUB_STEP_SUMMARY
           echo "**Status:** Plan Successful âœ…" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -161,7 +161,7 @@ jobs:
           echo "- Terraform syntax âœ…" >> $GITHUB_STEP_SUMMARY
           echo "- Azure authentication âœ…" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "í¾‰ **Ready for actual deployment!**" >> $GITHUB_STEP_SUMMARY
+          echo "ðŸŽ‰ **Ready for actual deployment!**" >> $GITHUB_STEP_SUMMARY
 
   test-failed:
     needs: [detect-environment, validate-structure, terraform-plan-only]
