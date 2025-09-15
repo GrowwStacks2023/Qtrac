@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-# terraform/environments/dev/main.tf
-# Development Environment Resources
-
 terraform {
   required_providers {
     azurerm = {
@@ -599,4 +595,5 @@ output "ssh_key_retrieval_command" {
   value       = "az keyvault secret show --vault-name ${azurerm_key_vault.dev_keyvault.name} --name vm-ssh-private-key --query value -o tsv > ~/.ssh/vm_key && chmod 600 ~/.ssh/vm_key"
   description = "Command to retrieve SSH private key from Key Vault and set proper permissions"
 }
+
 >>>>>>> de992b5edb63cc4db8d5af75c47f16b2f48fba0a
