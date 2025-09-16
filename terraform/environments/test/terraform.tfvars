@@ -22,6 +22,7 @@ existing_postgres_port = "5432"
 # Storage Configuration
 storage_account_tier = "Standard"
 storage_replication_type = "GRS"  # Geo-redundant for test
+deployment_version = "v1"
 
 # Network Configuration
 vnet_address_space = ["10.1.0.0/16"]  # Different IP range for test
