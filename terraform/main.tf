@@ -43,7 +43,7 @@ resource "azurerm_subnet" "vm_subnet" {
   name                 = "${var.project_name}-${var.environment}-vm-subnet"
   resource_group_name  = data.azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.main_vnet.name
-  address_prefixes     = ["10.0.1.0/24"]
+  address_prefixes = var.subnet_address_prefix
 }
 
 # Network Security Group for VMs
