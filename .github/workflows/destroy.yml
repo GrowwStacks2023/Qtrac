@@ -92,6 +92,15 @@ jobs:
           terraform init
           echo "Terraform initialized for ${{ needs.validate-destroy-request.outputs.environment }} environment"
 
+      - name: Debug - List available files
+        run: |
+          echo "Current directory contents:"
+          ls -la
+          echo "Looking for tfvars files:"
+          find . -name "*.tfvars" -type f
+          echo "Looking for terraform files:"
+          find . -name "*.tf" -type f
+
       - name: Create tfvars for environment
         run: |
           ENV="${{ needs.validate-destroy-request.outputs.environment }}"
@@ -99,24 +108,34 @@ jobs:
           # Create appropriate tfvars file based on environment
           case $ENV in
             dev)
-              cp terraform-dev.tfvars terraform.tfvars
+              cp terraform-dev.tfvars terraform.tfvars || echo "terraform-dev.tfvars not found, using default"
               ;;
             test)
-              cp terraform-test.tfvars terraform.tfvars
+              cp terraform-test.tfvars terraform.tfvars || echo "terraform-test.tfvars not found, using default"
               ;;
             prod)
-              cp terraform-prod.tfvars terraform.tfvars
+              cp terraform-prod.tfvars terraform.tfvars || echo "terraform-prod.tfvars not found, using default"
               ;;
           esac
+          
+          # If no environment-specific file exists, create basic one with environment
+          if [ ! -f terraform.tfvars ]; then
+            echo "environment = \"$ENV\"" > terraform.tfvars
+            echo "project_name = \"brisklearning\"" >> terraform.tfvars
+            echo "Created basic terraform.tfvars file"
+          fi
 
       - name: Terraform Plan Destroy
+        working-directory: ./terraform
         run: |
           echo "Planning destroy for ${{ needs.validate-destroy-request.outputs.environment }} environment..."
-          terraform plan -destroy -var-file="terraform.tfvars" -out=destroy-plan
+          ENV="${{ needs.validate-destroy-request.outputs.environment }}"
+          terraform plan -destroy -var-file="environments/$ENV/terraform.tfvars" -out=destroy-plan
           terraform show -no-color destroy-plan > destroy-plan.txt
           echo "Destroy plan completed"
 
       - name: Display Destroy Plan
+        working-directory: ./terraform
         run: |
           echo "## Destroy Plan for ${{ needs.validate-destroy-request.outputs.environment }} Environment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -134,12 +153,14 @@ jobs:
           echo "Proceeding with destroy..."
 
       - name: Terraform Destroy
+        working-directory: ./terraform
         run: |
           echo "Destroying ${{ needs.validate-destroy-request.outputs.environment }} environment..."
           terraform apply -destroy -auto-approve destroy-plan
           echo "Infrastructure destroyed successfully"
 
       - name: Verify Destruction
+        working-directory: ./terraform
         run: |
           echo "Verifying resources are destroyed..."
           terraform show > post-destroy-state.txt
