@@ -1,4 +1,3 @@
-# --- WORKFLOW FILE START ---
 name: Destroy Infrastructure Resources
 
 on:
@@ -39,31 +38,25 @@ jobs:
       - name: Validate Destroy Request
         id: validate
         run: |
-          echo "Inputs received:"
-          echo "  confirmation=${{ github.event.inputs.confirmation }}"
-          echo "  environment=${{ github.event.inputs.environment }}"
-          echo "  force_destroy=${{ github.event.inputs.force_destroy }}"
-
           if [ "${{ github.event.inputs.confirmation }}" != "DESTROY" ]; then
             echo "Invalid confirmation. You must type 'DESTROY' exactly."
             echo "should-destroy=false" >> $GITHUB_OUTPUT
             exit 1
           fi
-
-          ENV="$GITHUB_EVENT_INPUTS_ENVIRONMENT"
-          echo "Selected environment: $ENV"
-
+          
+          ENV="${{ github.event.inputs.environment }}"
+          
           if [[ ! "$ENV" =~ ^(dev|test|prod)$ ]]; then
             echo "Invalid environment: $ENV"
             echo "should-destroy=false" >> $GITHUB_OUTPUT
             exit 1
           fi
-
+          
           echo "Validation passed"
+          echo "Environment: $ENV"
+          
           echo "should-destroy=true" >> $GITHUB_OUTPUT
           echo "environment=$ENV" >> $GITHUB_OUTPUT
-        env:
-          GITHUB_EVENT_INPUTS_ENVIRONMENT: ${{ github.event.inputs.environment }}
 
       - name: Production Safety Check
         if: github.event.inputs.environment == 'prod' && github.event.inputs.force_destroy == false
@@ -95,7 +88,10 @@ jobs:
       - name: Azure CLI Login
         uses: azure/login@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
 
       - name: Terraform Init
         run: |
@@ -105,7 +101,8 @@ jobs:
       - name: Create tfvars for environment
         run: |
           ENV="${{ needs.validate-destroy-request.outputs.environment }}"
-
+          
+          # Create appropriate tfvars file based on environment
           case $ENV in
             dev)
               cp terraform-dev.tfvars terraform.tfvars
@@ -165,17 +162,35 @@ jobs:
         run: |
           echo "Terraform destroy failed. Attempting manual cleanup..."
           ENV="${{ needs.validate-destroy-request.outputs.environment }}"
-
+          
+          # Delete resources manually
+          echo "Attempting to delete resources for environment: $ENV"
+          
+          # Delete VM if exists
           az vm delete --name "brisklearning-${ENV}-vm" --resource-group "palash" --yes || true
+          
+          # Delete Network Interface
           az network nic delete --name "brisklearning-${ENV}-vm-nic" --resource-group "palash" || true
+          
+          # Delete Public IP
           az network public-ip delete --name "brisklearning-${ENV}-vm-ip" --resource-group "palash" || true
+          
+          # Delete NSG
           az network nsg delete --name "brisklearning-${ENV}-vm-nsg" --resource-group "palash" || true
+          
+          # Delete Subnet (this might fail due to dependencies)
           az network vnet subnet delete --name "brisklearning-${ENV}-vm-subnet" --vnet-name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
+          
+          # Delete VNet
           az network vnet delete --name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
+          
+          # Delete Key Vault (be careful with this)
           az keyvault delete --name "brisklearning-${ENV}-kv" --resource-group "palash" || true
           az keyvault purge --name "brisklearning-${ENV}-kv" || true
+          
+          # Delete Storage Account
           az storage account delete --name "brisklearning${ENV}storage" --resource-group "palash" --yes || true
-
+          
           echo "Manual cleanup attempted. Some resources may require additional manual intervention."
 
       - name: Destroy Summary
@@ -195,4 +210,3 @@ jobs:
           echo "- Network Security Groups and related resources" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Cost Impact:** Resources are no longer incurring charges" >> $GITHUB_STEP_SUMMARY
-# --- WORKFLOW FILE END ---
