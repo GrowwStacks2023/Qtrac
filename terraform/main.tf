@@ -191,7 +191,7 @@ resource "azurerm_key_vault" "main_keyvault" {
 
 # Storage Account for file processing
 resource "azurerm_storage_account" "main_storage" {
-  name = "${lower(var.project_name)}${var.environment}${var.deployment_version}storage"
+  name = "bl${var.environment}${var.deployment_version}storage"
   resource_group_name      = data.azurerm_resource_group.main.name
   location                 = var.location
   account_tier             = var.storage_account_tier
