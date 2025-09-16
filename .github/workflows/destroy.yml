@@ -58,19 +58,6 @@ jobs:
           echo "should-destroy=true" >> $GITHUB_OUTPUT
           echo "environment=$ENV" >> $GITHUB_OUTPUT
 
-      - name: Production Safety Check
-        if: github.event.inputs.environment == 'prod' && github.event.inputs.force_destroy == false
-        run: |
-          echo "PRODUCTION DESTROY ATTEMPT" >> $GITHUB_STEP_SUMMARY
-          echo "This is a PRODUCTION environment destroy request." >> $GITHUB_STEP_SUMMARY
-          echo "Production destroys require manual review." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "If you really need to destroy production:" >> $GITHUB_STEP_SUMMARY
-          echo "1. Re-run this workflow" >> $GITHUB_STEP_SUMMARY
-          echo "2. Check 'Force destroy' option" >> $GITHUB_STEP_SUMMARY
-          echo "3. Get approval from team lead" >> $GITHUB_STEP_SUMMARY
-          exit 1
-
   destroy-infrastructure:
     needs: validate-destroy-request
     runs-on: ubuntu-latest
@@ -85,44 +72,24 @@ jobs:
         with:
           terraform_version: 1.5.0
 
-      # No Azure CLI login needed - using ARM environment variables like deploy.yml
-
       - name: Terraform Init
+        working-directory: ./terraform
         run: |
           terraform init
           echo "Terraform initialized for ${{ needs.validate-destroy-request.outputs.environment }} environment"
 
-      - name: Debug - List available files
-        run: |
-          echo "Current directory contents:"
-          ls -la
-          echo "Looking for tfvars files:"
-          find . -name "*.tfvars" -type f
-          echo "Looking for terraform files:"
-          find . -name "*.tf" -type f
-
-      - name: Create tfvars for environment
+      - name: Setup Environment Variables
+        working-directory: ./terraform
         run: |
           ENV="${{ needs.validate-destroy-request.outputs.environment }}"
+          echo "Setting up for environment: $ENV"
           
-          # Create appropriate tfvars file based on environment
-          case $ENV in
-            dev)
-              cp terraform-dev.tfvars terraform.tfvars || echo "terraform-dev.tfvars not found, using default"
-              ;;
-            test)
-              cp terraform-test.tfvars terraform.tfvars || echo "terraform-test.tfvars not found, using default"
-              ;;
-            prod)
-              cp terraform-prod.tfvars terraform.tfvars || echo "terraform-prod.tfvars not found, using default"
-              ;;
-          esac
-          
-          # If no environment-specific file exists, create basic one with environment
-          if [ ! -f terraform.tfvars ]; then
-            echo "environment = \"$ENV\"" > terraform.tfvars
-            echo "project_name = \"brisklearning\"" >> terraform.tfvars
-            echo "Created basic terraform.tfvars file"
+          if [ -d "environments/$ENV" ]; then
+            echo "Found environment folder: environments/$ENV"
+            ls -la "environments/$ENV/"
+          else
+            echo "Environment folder not found: environments/$ENV"
+            exit 1
           fi
 
       - name: Terraform Plan Destroy
@@ -134,24 +101,6 @@ jobs:
           terraform show -no-color destroy-plan > destroy-plan.txt
           echo "Destroy plan completed"
 
-      - name: Display Destroy Plan
-        working-directory: ./terraform
-        run: |
-          echo "## Destroy Plan for ${{ needs.validate-destroy-request.outputs.environment }} Environment" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Resources to be DESTROYED:**" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          head -n 50 destroy-plan.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-
-      - name: Final Confirmation Wait
-        run: |
-          echo "Waiting 15 seconds before destroy..."
-          echo "This gives you time to cancel if needed."
-          echo "To cancel: Go to Actions tab and cancel this workflow"
-          sleep 15
-          echo "Proceeding with destroy..."
-
       - name: Terraform Destroy
         working-directory: ./terraform
         run: |
@@ -159,73 +108,25 @@ jobs:
           terraform apply -destroy -auto-approve destroy-plan
           echo "Infrastructure destroyed successfully"
 
-      - name: Verify Destruction
-        working-directory: ./terraform
-        run: |
-          echo "Verifying resources are destroyed..."
-          terraform show > post-destroy-state.txt
-          
-          if [ -s post-destroy-state.txt ]; then
-            echo "Some resources may still exist"
-            cat post-destroy-state.txt
-          else
-            echo "All resources confirmed destroyed"
-          fi
-
       - name: Manual Cleanup (if needed)
         if: failure()
         run: |
           echo "Terraform destroy failed. Attempting manual cleanup..."
           ENV="${{ needs.validate-destroy-request.outputs.environment }}"
           
-          # Login to Azure using service principal
           az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID"
           az account set --subscription "$ARM_SUBSCRIPTION_ID"
           
-          # Delete resources manually
           echo "Attempting to delete resources for environment: $ENV"
           
-          # Delete VM if exists
           az vm delete --name "brisklearning-${ENV}-vm" --resource-group "palash" --yes || true
-          
-          # Delete Network Interface
           az network nic delete --name "brisklearning-${ENV}-vm-nic" --resource-group "palash" || true
-          
-          # Delete Public IP
           az network public-ip delete --name "brisklearning-${ENV}-vm-ip" --resource-group "palash" || true
-          
-          # Delete NSG
           az network nsg delete --name "brisklearning-${ENV}-vm-nsg" --resource-group "palash" || true
-          
-          # Delete Subnet (this might fail due to dependencies)
           az network vnet subnet delete --name "brisklearning-${ENV}-vm-subnet" --vnet-name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
-          
-          # Delete VNet
           az network vnet delete --name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
-          
-          # Delete Key Vault (be careful with this)
           az keyvault delete --name "brisklearning-${ENV}-kv" --resource-group "palash" || true
           az keyvault purge --name "brisklearning-${ENV}-kv" || true
-          
-          # Delete Storage Account
           az storage account delete --name "brisklearning${ENV}storage" --resource-group "palash" --yes || true
           
-          echo "Manual cleanup attempted. Some resources may require additional manual intervention."
-
-      - name: Destroy Summary
-        if: success()
-        run: |
-          echo "## Destruction Complete!" >> $GITHUB_STEP_SUMMARY
-          echo "**Environment:** ${{ needs.validate-destroy-request.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Destroyed At:** $(date)" >> $GITHUB_STEP_SUMMARY
-          echo "**Triggered By:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Resources Destroyed:" >> $GITHUB_STEP_SUMMARY
-          echo "- Virtual Machine: brisklearning-${{ needs.validate-destroy-request.outputs.environment }}-vm" >> $GITHUB_STEP_SUMMARY
-          echo "- Public IP: brisklearning-${{ needs.validate-destroy-request.outputs.environment }}-vm-ip" >> $GITHUB_STEP_SUMMARY
-          echo "- Storage Account: brisklearning${{ needs.validate-destroy-request.outputs.environment }}storage" >> $GITHUB_STEP_SUMMARY
-          echo "- Key Vault: brisklearning-${{ needs.validate-destroy-request.outputs.environment }}-kv" >> $GITHUB_STEP_SUMMARY
-          echo "- Virtual Network: brisklearning-${{ needs.validate-destroy-request.outputs.environment }}-vnet" >> $GITHUB_STEP_SUMMARY
-          echo "- Network Security Groups and related resources" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Cost Impact:** Resources are no longer incurring charges" >> $GITHUB_STEP_SUMMARY
+          echo "Manual cleanup attempted."
