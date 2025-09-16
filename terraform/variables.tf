@@ -132,6 +132,7 @@ variable "common_tags" {
     ManagedBy    = "terraform"
     Purpose      = "data-processing"
   }
+}
 # Deployment Version for Resource Naming
 variable "deployment_version" {
   description = "Version suffix to avoid resource conflicts (e.g., v1, v2, v3)"
