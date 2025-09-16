@@ -132,4 +132,14 @@ variable "common_tags" {
     ManagedBy    = "terraform"
     Purpose      = "data-processing"
   }
+# Deployment Version for Resource Naming
+variable "deployment_version" {
+  description = "Version suffix to avoid resource conflicts (e.g., v1, v2, v3)"
+  type        = string
+  default     = "v1"
+  
+  validation {
+    condition     = can(regex("^v[0-9]+$", var.deployment_version))
+    error_message = "Deployment version must follow format 'v1', 'v2', etc."
+  }
 }

@@ -164,7 +164,7 @@ resource "azurerm_network_interface" "main_vm_nic" {
 
 # Key Vault for storing secrets
 resource "azurerm_key_vault" "main_keyvault" {
-  name                = "${var.project_name}-${var.environment}-kv"
+  name = "${var.project_name}-${var.environment}-${var.deployment_version}-kv"
   location            = var.location
   resource_group_name = data.azurerm_resource_group.main.name
   tenant_id           = "f1845ecc-10c8-4389-a2d1-e5f8d7326bfd"
@@ -191,7 +191,7 @@ resource "azurerm_key_vault" "main_keyvault" {
 
 # Storage Account for file processing
 resource "azurerm_storage_account" "main_storage" {
-  name                     = "${lower(var.project_name)}${var.environment}storage"
+  name = "${lower(var.project_name)}${var.environment}${var.deployment_version}storage"
   resource_group_name      = data.azurerm_resource_group.main.name
   location                 = var.location
   account_tier             = var.storage_account_tier
