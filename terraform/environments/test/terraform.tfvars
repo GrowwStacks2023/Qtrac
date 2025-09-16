@@ -1,7 +1,7 @@
 # Test Environment Configuration
 environment = "test"
 project_name = "brisklearning"
-location = "centralindia"
+location = "southeastasia"  # Changed from centralindia to avoid quota issues
 resource_group_name = "palash"
 
 # VM Configuration
