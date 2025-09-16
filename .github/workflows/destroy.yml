@@ -38,7 +38,7 @@ jobs:
       - name: Validate Destroy Request
         id: validate
         run: |
-          if [ "\${{ github.event.inputs.confirmation }}" != "DESTROY" ]; then
+          if [ "${{ github.event.inputs.confirmation }}" != "DESTROY" ]; then
             echo "Invalid confirmation. You must type 'DESTROY' exactly."
             echo "should-destroy=false" >> \$GITHUB_OUTPUT
             exit 1
