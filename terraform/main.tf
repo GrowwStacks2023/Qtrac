@@ -164,7 +164,7 @@ resource "azurerm_network_interface" "main_vm_nic" {
 
 # Key Vault for storing secrets
 resource "azurerm_key_vault" "main_keyvault" {
-  name = "${var.project_name}-${var.environment}-${var.deployment_version}-kv"
+  name = "bl${var.environment}${var.deployment_version}storage"
   location            = var.location
   resource_group_name = data.azurerm_resource_group.main.name
   tenant_id           = "f1845ecc-10c8-4389-a2d1-e5f8d7326bfd"

@@ -109,3 +109,97 @@ jobs:
           echo "- Main Site: ${{ steps.terraform-outputs.outputs.main_website_url }}" >> $GITHUB_STEP_SUMMARY
           echo "- n8n Interface: ${{ steps.terraform-outputs.outputs.n8n_url }}" >> $GITHUB_STEP_SUMMARY
           echo "- Health Check: http://${{ steps.terraform-outputs.outputs.vm_public_ip }}:8080/health" >> $GITHUB_STEP_SUMMARY
+
+  cleanup-on-failure:
+    needs: [detect-environment, deploy]
+    runs-on: ubuntu-latest
+    if: failure() && needs.detect-environment.outputs.should-deploy == 'true'
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Init for Cleanup
+        working-directory: ./terraform
+        run: terraform init
+
+      - name: Select Workspace for Cleanup
+        working-directory: ./terraform
+        run: |
+          terraform workspace select ${{ needs.detect-environment.outputs.target-environment }} || echo "Workspace doesn't exist yet"
+
+      - name: Terraform Destroy Failed Resources
+        working-directory: ./terraform
+        run: |
+          echo "Deployment failed. Cleaning up partially created resources..."
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          
+          # Attempt terraform destroy first
+          terraform destroy -var-file="environments/$ENV/terraform.tfvars" -auto-approve || echo "Terraform destroy completed with some errors"
+
+      - name: Manual Azure Cleanup
+        run: |
+          echo "Performing manual cleanup of any remaining resources..."
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          
+          # Login to Azure
+          az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID"
+          az account set --subscription "$ARM_SUBSCRIPTION_ID"
+          
+          # Delete resources that might exist
+          echo "Cleaning up resources for environment: $ENV"
+          
+          # VM and related resources
+          az vm delete --name "brisklearning-${ENV}-vm" --resource-group "palash" --yes || true
+          az vm delete --name "brisklearning-${ENV}-v1-vm" --resource-group "palash" --yes || true
+          
+          # Network resources
+          az network nic delete --name "brisklearning-${ENV}-vm-nic" --resource-group "palash" || true
+          az network nic delete --name "brisklearning-${ENV}-v1-vm-nic" --resource-group "palash" || true
+          
+          az network public-ip delete --name "brisklearning-${ENV}-vm-ip" --resource-group "palash" || true
+          az network public-ip delete --name "brisklearning-${ENV}-v1-vm-ip" --resource-group "palash" || true
+          
+          az network nsg delete --name "brisklearning-${ENV}-vm-nsg" --resource-group "palash" || true
+          az network nsg delete --name "brisklearning-${ENV}-v1-vm-nsg" --resource-group "palash" || true
+          
+          # Subnets and VNets
+          az network vnet subnet delete --name "brisklearning-${ENV}-vm-subnet" --vnet-name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
+          az network vnet subnet delete --name "brisklearning-${ENV}-v1-vm-subnet" --vnet-name "brisklearning-${ENV}-v1-vnet" --resource-group "palash" || true
+          
+          az network vnet delete --name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
+          az network vnet delete --name "brisklearning-${ENV}-v1-vnet" --resource-group "palash" || true
+          
+          # Key Vaults
+          az keyvault delete --name "brisklearning-${ENV}-kv" --resource-group "palash" || true
+          az keyvault delete --name "brisklearning-${ENV}-v1-kv" --resource-group "palash" || true
+          az keyvault purge --name "brisklearning-${ENV}-kv" || true
+          az keyvault purge --name "brisklearning-${ENV}-v1-kv" || true
+          
+          # Storage Accounts
+          az storage account delete --name "brisklearning${ENV}storage" --resource-group "palash" --yes || true
+          az storage account delete --name "brisklearning${ENV}v1storage" --resource-group "palash" --yes || true
+          
+          echo "Cleanup completed. Some resources may require manual intervention."
+
+      - name: Cleanup Summary
+        run: |
+          echo "## Cleanup Completed!" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ needs.detect-environment.outputs.target-environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Cleanup Time:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "**Reason:** Deployment failed, cleaned up partial resources" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Actions Taken:" >> $GITHUB_STEP_SUMMARY
+          echo "- Ran terraform destroy on failed deployment" >> $GITHUB_STEP_SUMMARY
+          echo "- Manually cleaned up remaining Azure resources" >> $GITHUB_STEP_SUMMARY
+          echo "- Removed both versioned and non-versioned resources" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps:" >> $GITHUB_STEP_SUMMARY
+          echo "- Review deployment logs to identify the failure cause" >> $GITHUB_STEP_SUMMARY
+          echo "- Fix the issue and retry deployment" >> $GITHUB_STEP_SUMMARY
+          echo "- Resources are cleaned up, no ongoing costs" >> $GITHUB_STEP_SUMMARY
