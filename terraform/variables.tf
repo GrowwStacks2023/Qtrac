@@ -11,7 +11,7 @@ variable "environment" {
 variable "location" {
   description = "Azure region for resource deployment"
   type        = string
-  default     = "southeastasia"  # Updated to match your deployment
+  default     = "southeastasia"
 }
 
 variable "resource_group_name" {
@@ -39,6 +39,12 @@ variable "admin_username" {
   default     = "azureuser"
 }
 
+variable "vm_admin_password" {
+  description = "Admin password for the virtual machine"
+  type        = string
+  sensitive   = true
+}
+
 # Storage Configuration
 variable "storage_account_tier" {
   description = "Storage account tier"
@@ -49,7 +55,7 @@ variable "storage_account_tier" {
 variable "storage_replication_type" {
   description = "Storage account replication type"
   type        = string
-  default     = "GRS"  # Updated to match your deployment
+  default     = "GRS"
 }
 
 # Key Vault Configuration
@@ -69,58 +75,13 @@ variable "purge_protection_enabled" {
 variable "vnet_address_space" {
   description = "Address space for virtual network"
   type        = list(string)
-  default     = ["10.1.0.0/16"]  # Updated to match your deployment
+  default     = ["10.1.0.0/16"]
 }
 
 variable "subnet_address_prefix" {
   description = "Address prefix for subnet"
   type        = list(string)
-  default     = ["10.1.1.0/24"]  # Updated to match your deployment
-}
-
-# EXISTING PostgreSQL Server Configuration (External)
-variable "existing_postgres_host" {
-  description = "Existing PostgreSQL server hostname"
-  type        = string
-  default     = "scannedfiles.postgres.database.azure.com"
-}
-
-variable "existing_postgres_user" {
-  description = "Existing PostgreSQL username"
-  type        = string
-  default     = "developergrowwstacks"
-}
-
-variable "existing_postgres_password" {
-  description = "Existing PostgreSQL password"
-  type        = string
-  sensitive   = true
-  default     = "palash2003@"
-}
-
-variable "existing_postgres_database" {
-  description = "Existing PostgreSQL database name"
-  type        = string
-  default     = "processed"
-}
-
-variable "existing_postgres_port" {
-  description = "Existing PostgreSQL port"
-  type        = string
-  default     = "5432"
-}
-
-# SSL and Domain Configuration
-variable "domain_name" {
-  description = "Your domain name for SSL certificates"
-  type        = string
-  default     = "brisklearning.com"
-}
-
-variable "ssl_email" {
-  description = "Email address for Let's Encrypt SSL certificates"
-  type        = string
-  default     = "admin@brisklearning.com"
+  default     = ["10.1.1.0/24"]
 }
 
 # Tags
@@ -145,4 +106,46 @@ variable "deployment_version" {
     condition     = can(regex("^v[0-9]+$", var.deployment_version))
     error_message = "Deployment version must follow format 'v1', 'v2', etc."
   }
+}
+
+# PostgreSQL Configuration Variables (MISSING FROM YOUR CURRENT FILE)
+variable "postgres_host" {
+  description = "PostgreSQL server hostname"
+  type        = string
+  sensitive   = true
+}
+
+variable "postgres_user" {
+  description = "PostgreSQL username"
+  type        = string
+  sensitive   = true
+}
+
+variable "postgres_password" {
+  description = "PostgreSQL password"
+  type        = string
+  sensitive   = true
+}
+
+variable "postgres_database" {
+  description = "PostgreSQL database name"
+  type        = string
+  sensitive   = true
+}
+
+variable "postgres_port" {
+  description = "PostgreSQL port"
+  type        = string
+  default     = "5432"
+}
+
+# Application Configuration Variables (MISSING FROM YOUR CURRENT FILE)
+variable "domain_name" {
+  description = "Domain name for the application"
+  type        = string
+}
+
+variable "ssl_email" {
+  description = "Email address for SSL certificate generation"
+  type        = string
 }

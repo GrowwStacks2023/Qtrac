@@ -152,8 +152,10 @@ jobs:
           ENV="${{ needs.validate-destroy-request.outputs.environment }}"
           echo "Planning destroy for $ENV environment..."
           
-          # Note: Using environment and deployment_version variables from the state
-          terraform plan -destroy -var-file="environments/$ENV/terraform.tfvars" -out=destroy-plan
+          terraform plan -destroy \
+            -var-file="environments/$ENV/terraform.tfvars" \
+            -var="vm_admin_password=${{ secrets.VM_ADMIN_PASSWORD }}" \
+            -out=destroy-plan
           terraform show -no-color destroy-plan > destroy-plan.txt
           echo "Destroy plan completed"
 

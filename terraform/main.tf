@@ -224,43 +224,10 @@ resource "azurerm_storage_container" "quarantine" {
   container_access_type = "private"
 }
 
-# Generate SSH key pair
-resource "tls_private_key" "vm_ssh" {
-  algorithm = "RSA"
-  rsa_bits  = 4096
-}
-
-# Store SSH keys in Key Vault
-resource "azurerm_key_vault_secret" "vm_ssh_private_key" {
-  name         = "vm-ssh-private-key"
-  value        = tls_private_key.vm_ssh.private_key_pem
-  key_vault_id = azurerm_key_vault.main_keyvault.id
-
-  depends_on = [azurerm_key_vault.main_keyvault]
-
-  tags = merge(var.common_tags, {
-    Environment = var.environment
-    Purpose     = "vm-access"
-  })
-}
-
-resource "azurerm_key_vault_secret" "vm_ssh_public_key" {
-  name         = "vm-ssh-public-key"
-  value        = tls_private_key.vm_ssh.public_key_openssh
-  key_vault_id = azurerm_key_vault.main_keyvault.id
-
-  depends_on = [azurerm_key_vault.main_keyvault]
-
-  tags = merge(var.common_tags, {
-    Environment = var.environment
-    Purpose     = "vm-access"
-  })
-}
-
 # Store PostgreSQL credentials in Key Vault (EXISTING SERVER)
 resource "azurerm_key_vault_secret" "postgres_host" {
   name         = "postgres-host"
-  value        = var.existing_postgres_host
+  value        = var.postgres_host
   key_vault_id = azurerm_key_vault.main_keyvault.id
 
   depends_on = [azurerm_key_vault.main_keyvault]
@@ -273,7 +240,7 @@ resource "azurerm_key_vault_secret" "postgres_host" {
 
 resource "azurerm_key_vault_secret" "postgres_user" {
   name         = "postgres-user"
-  value        = var.existing_postgres_user
+  value        = var.postgres_user
   key_vault_id = azurerm_key_vault.main_keyvault.id
 
   depends_on = [azurerm_key_vault.main_keyvault]
@@ -286,7 +253,7 @@ resource "azurerm_key_vault_secret" "postgres_user" {
 
 resource "azurerm_key_vault_secret" "postgres_password" {
   name         = "postgres-password"
-  value        = var.existing_postgres_password
+  value        = var.postgres_password
   key_vault_id = azurerm_key_vault.main_keyvault.id
 
   depends_on = [azurerm_key_vault.main_keyvault]
@@ -299,7 +266,7 @@ resource "azurerm_key_vault_secret" "postgres_password" {
 
 resource "azurerm_key_vault_secret" "postgres_database" {
   name         = "postgres-database"
-  value        = var.existing_postgres_database
+  value        = var.postgres_database
   key_vault_id = azurerm_key_vault.main_keyvault.id
 
   depends_on = [azurerm_key_vault.main_keyvault]
@@ -312,7 +279,7 @@ resource "azurerm_key_vault_secret" "postgres_database" {
 
 resource "azurerm_key_vault_secret" "postgres_connection_string" {
   name         = "postgres-connection-string"
-  value        = "postgresql://${var.existing_postgres_user}:${var.existing_postgres_password}@${var.existing_postgres_host}:${var.existing_postgres_port}/${var.existing_postgres_database}?sslmode=require"
+  value        = "postgresql://${var.postgres_user}:${var.postgres_password}@${var.postgres_host}:${var.postgres_port}/${var.postgres_database}?sslmode=require"
   key_vault_id = azurerm_key_vault.main_keyvault.id
 
   depends_on = [azurerm_key_vault.main_keyvault]
@@ -320,6 +287,20 @@ resource "azurerm_key_vault_secret" "postgres_connection_string" {
   tags = merge(var.common_tags, {
     Environment = var.environment
     Purpose     = "database-access"
+  })
+}
+
+# Add password to Key Vault after it's created
+resource "azurerm_key_vault_secret" "vm_admin_password" {
+  name         = "vm-admin-password"
+  value        = var.vm_admin_password
+  key_vault_id = azurerm_key_vault.main_keyvault.id
+
+  depends_on = [azurerm_key_vault.main_keyvault]
+
+  tags = merge(var.common_tags, {
+    Environment = var.environment
+    Purpose     = "vm-access"
   })
 }
 
@@ -331,16 +312,13 @@ resource "azurerm_linux_virtual_machine" "main_vm" {
   size                = var.vm_size
   admin_username      = var.admin_username
 
-  disable_password_authentication = true
+  # Change to password authentication
+  disable_password_authentication = false
+  admin_password                  = var.vm_admin_password
 
   network_interface_ids = [
     azurerm_network_interface.main_vm_nic.id,
   ]
-
-  admin_ssh_key {
-    username   = var.admin_username
-    public_key = tls_private_key.vm_ssh.public_key_openssh
-  }
 
   os_disk {
     caching              = "ReadWrite"
@@ -357,12 +335,12 @@ resource "azurerm_linux_virtual_machine" "main_vm" {
 
   # Custom data script to install Docker, n8n, ClamAV, and Caddy
   custom_data = base64encode(templatefile("${path.module}/cloud-init.yml", {
-    postgres_connection_string = "postgresql://${var.existing_postgres_user}:${var.existing_postgres_password}@${var.existing_postgres_host}:${var.existing_postgres_port}/${var.existing_postgres_database}?sslmode=require"
-    postgres_host = var.existing_postgres_host
-    postgres_user = var.existing_postgres_user
-    postgres_password = var.existing_postgres_password
-    postgres_database = var.existing_postgres_database
-    postgres_port = var.existing_postgres_port
+    postgres_connection_string = "postgresql://${var.postgres_user}:${var.postgres_password}@${var.postgres_host}:${var.postgres_port}/${var.postgres_database}?sslmode=require"
+    postgres_host = var.postgres_host
+    postgres_user = var.postgres_user
+    postgres_password = var.postgres_password
+    postgres_database = var.postgres_database
+    postgres_port = var.postgres_port
     storage_account_name = azurerm_storage_account.main_storage.name
     storage_account_key = azurerm_storage_account.main_storage.primary_access_key
     domain_name = var.domain_name
