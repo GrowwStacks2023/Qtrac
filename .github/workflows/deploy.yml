@@ -15,7 +15,7 @@ on:
         type: choice
         options:
         - dev
-        - test  
+        - test
         - prod
       deployment_version:
         description: 'Deployment version (v1, v2, v3, etc.)'
@@ -36,7 +36,7 @@ jobs:
       target-environment: ${{ steps.parse-trigger.outputs.environment }}
       should-deploy: ${{ steps.parse-trigger.outputs.should-deploy }}
       deployment-version: ${{ steps.parse-trigger.outputs.deployment-version }}
-    
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -69,32 +69,87 @@ jobs:
     runs-on: ubuntu-latest
     if: needs.detect-environment.outputs.should-deploy == 'true'
     environment: ${{ needs.detect-environment.outputs.target-environment }}
-    
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git for State Management
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.5.0
 
+      - name: Create State Directory
+        run: |
+          mkdir -p terraform/state
+
+      - name: Check for Existing State
+        id: state_check
+        run: |
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          STATE_FILE="terraform/state/${ENV}.tfstate"
+          if [ -f "$STATE_FILE" ]; then
+            echo "existing_state=true" >> $GITHUB_OUTPUT
+            echo "Found existing state for $ENV environment"
+          else
+            echo "existing_state=false" >> $GITHUB_OUTPUT
+            echo "No existing state found - proceeding with fresh deployment"
+          fi
+
       - name: Terraform Init
         working-directory: ./terraform
         run: terraform init
 
+      - name: Load Existing State
+        if: steps.state_check.outputs.existing_state == 'true'
+        working-directory: ./terraform
+        run: |
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          cp "state/${ENV}.tfstate" terraform.tfstate
+          echo "Loaded existing state from repository"
+
       - name: Terraform Plan
         working-directory: ./terraform
         run: |
-          terraform workspace select ${{ needs.detect-environment.outputs.target-environment }} || terraform workspace new ${{ needs.detect-environment.outputs.target-environment }}
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
+
+          echo "Planning deployment for $ENV environment (version $VERSION)..."
           terraform plan \
-            -var="environment=${{ needs.detect-environment.outputs.target-environment }}" \
-            -var="deployment_version=${{ needs.detect-environment.outputs.deployment-version }}" \
+            -var="environment=$ENV" \
+            -var="deployment_version=$VERSION" \
             -out=tfplan
 
       - name: Terraform Apply
         working-directory: ./terraform
-        run: terraform apply tfplan
+        run: |
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          echo "Applying infrastructure for $ENV environment..."
+          terraform apply -auto-approve tfplan
+          echo "Infrastructure deployed successfully"
+
+      - name: Save State to Repository
+        working-directory: ./terraform
+        run: |
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          STATE_FILE="state/${ENV}.tfstate"
+
+          # Copy current state to repo
+          cp terraform.tfstate "$STATE_FILE"
+
+          # Add and commit state file
+          git add "$STATE_FILE"
+          git commit -m "Update Terraform state for $ENV environment [automated]" || echo "No state changes to commit"
+          git push origin main
+
+          echo "State saved to repository: $STATE_FILE"
 
       - name: Get Outputs
         id: terraform-outputs
@@ -121,15 +176,28 @@ jobs:
           echo "- Main Site: ${{ steps.terraform-outputs.outputs.main_website_url }}" >> $GITHUB_STEP_SUMMARY
           echo "- n8n Interface: ${{ steps.terraform-outputs.outputs.n8n_url }}" >> $GITHUB_STEP_SUMMARY
           echo "- Health Check: http://${{ steps.terraform-outputs.outputs.vm_public_ip }}:8080/health" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### For Local Testing (Hosts File Method):" >> $GITHUB_STEP_SUMMARY
+          echo "Add these entries to your hosts file:" >> $GITHUB_STEP_SUMMARY
+          echo "- ${{ steps.terraform-outputs.outputs.vm_public_ip }} ${{ needs.detect-environment.outputs.target-environment }}.brisklearning.com" >> $GITHUB_STEP_SUMMARY
+          echo "- ${{ steps.terraform-outputs.outputs.vm_public_ip }} n8n.${{ needs.detect-environment.outputs.target-environment }}.brisklearning.com" >> $GITHUB_STEP_SUMMARY
+          echo "- ${{ steps.terraform-outputs.outputs.vm_public_ip }} api.${{ needs.detect-environment.outputs.target-environment }}.brisklearning.com" >> $GITHUB_STEP_SUMMARY
 
   cleanup-on-failure:
     needs: [detect-environment, deploy]
     runs-on: ubuntu-latest
     if: failure() && needs.detect-environment.outputs.should-deploy == 'true'
-    
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git for State Management
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -140,10 +208,17 @@ jobs:
         working-directory: ./terraform
         run: terraform init
 
-      - name: Select Workspace for Cleanup
+      - name: Load State for Cleanup (if exists)
         working-directory: ./terraform
         run: |
-          terraform workspace select ${{ needs.detect-environment.outputs.target-environment }} || echo "Workspace doesn't exist yet"
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          STATE_FILE="state/${ENV}.tfstate"
+          if [ -f "$STATE_FILE" ]; then
+            cp "$STATE_FILE" terraform.tfstate
+            echo "Loaded state for cleanup"
+          else
+            echo "No state file found for cleanup"
+          fi
 
       - name: Terraform Destroy Failed Resources
         working-directory: ./terraform
@@ -152,11 +227,23 @@ jobs:
           echo "Deployment failed. Running terraform destroy..."
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
-          
+
           terraform destroy \
             -var="environment=$ENV" \
             -var="deployment_version=$VERSION" \
             -auto-approve || echo "Terraform destroy completed with some errors"
+
+      - name: Remove State File from Repository
+        run: |
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          STATE_FILE="terraform/state/${ENV}.tfstate"
+
+          if [ -f "$STATE_FILE" ]; then
+            git rm "$STATE_FILE"
+            git commit -m "Remove Terraform state for $ENV environment after failed deployment cleanup [automated]" || echo "No state file to remove"
+            git push origin main || echo "No state changes to push"
+            echo "State file removed from repository"
+          fi
 
       - name: Azure Login for Manual Cleanup
         run: |
@@ -171,13 +258,13 @@ jobs:
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
           RG="palash"
-          
+
           echo "Phase 1: Cleaning up VMs and compute resources..."
-          
+
           # Delete VMs first (this releases NIC associations)
           az vm delete --name "brisklearning-${ENV}-vm" --resource-group "$RG" --yes --no-wait || true
           az vm delete --name "bl${ENV}${VERSION}vm" --resource-group "$RG" --yes --no-wait || true
-          
+
           echo "Waiting 30 seconds for VM deletion to process..."
           sleep 30
 
@@ -187,13 +274,13 @@ jobs:
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
           RG="palash"
-          
+
           echo "Phase 2: Cleaning up Network Interface Cards..."
-          
+
           # Delete NICs (this releases public IP associations)
           az network nic delete --name "brisklearning-${ENV}-vm-nic" --resource-group "$RG" --no-wait || true
           az network nic delete --name "bl${ENV}${VERSION}nic" --resource-group "$RG" --no-wait || true
-          
+
           echo "Waiting 30 seconds for NIC deletion to process..."
           sleep 30
 
@@ -203,20 +290,20 @@ jobs:
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
           RG="palash"
-          
+
           echo "Phase 3: Cleaning up Public IPs and NSG associations..."
-          
+
           # Delete public IPs
           az network public-ip delete --name "brisklearning-${ENV}-vm-ip" --resource-group "$RG" || true
           az network public-ip delete --name "bl${ENV}${VERSION}ip" --resource-group "$RG" || true
-          
+
           # Remove NSG associations from subnets
           SUBNET_ID="/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RG/providers/Microsoft.Network/virtualNetworks/brisklearning-${ENV}-vnet/subnets/brisklearning-${ENV}-vm-subnet"
           az network vnet subnet update --ids "$SUBNET_ID" --network-security-group "" || true
-          
+
           SUBNET_ID_V2="/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RG/providers/Microsoft.Network/virtualNetworks/bl${ENV}${VERSION}vnet/subnets/bl${ENV}${VERSION}subnet"
           az network vnet subnet update --ids "$SUBNET_ID_V2" --network-security-group "" || true
-          
+
           echo "Waiting 30 seconds for NSG disassociation..."
           sleep 30
 
@@ -226,9 +313,9 @@ jobs:
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
           RG="palash"
-          
+
           echo "Phase 4: Cleaning up Network Security Groups..."
-          
+
           # Delete NSGs (now that they're not associated)
           az network nsg delete --name "brisklearning-${ENV}-vm-nsg" --resource-group "$RG" || true
           az network nsg delete --name "bl${ENV}${VERSION}nsg" --resource-group "$RG" || true
@@ -239,15 +326,15 @@ jobs:
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
           RG="palash"
-          
+
           echo "Phase 5: Cleaning up Virtual Networks and Subnets..."
-          
+
           # Delete subnets first, then VNets
           az network vnet subnet delete --name "brisklearning-${ENV}-vm-subnet" \
             --vnet-name "brisklearning-${ENV}-vnet" --resource-group "$RG" || true
           az network vnet subnet delete --name "bl${ENV}${VERSION}subnet" \
             --vnet-name "bl${ENV}${VERSION}vnet" --resource-group "$RG" || true
-          
+
           az network vnet delete --name "brisklearning-${ENV}-vnet" --resource-group "$RG" || true
           az network vnet delete --name "bl${ENV}${VERSION}vnet" --resource-group "$RG" || true
 
@@ -257,9 +344,9 @@ jobs:
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
           RG="palash"
-          
+
           echo "Phase 6: Cleaning up Storage Accounts..."
-          
+
           # Delete storage accounts (these also delete all containers)
           az storage account delete --name "bl${ENV}${VERSION}storage" --resource-group "$RG" --yes || true
           az storage account delete --name "brisklearning${ENV}storage" --resource-group "$RG" --yes || true
@@ -271,17 +358,17 @@ jobs:
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
           RG="palash"
-          
+
           echo "Phase 7: Cleaning up Key Vaults..."
-          
+
           # Delete Key Vaults
           az keyvault delete --name "bl${ENV}${VERSION}storage" --resource-group "$RG" || true
           az keyvault delete --name "brisklearning-${ENV}-kv" --resource-group "$RG" || true
           az keyvault delete --name "bltestv1storage" --resource-group "$RG" || true
-          
+
           echo "Waiting 60 seconds before purging Key Vaults..."
           sleep 60
-          
+
           # Purge Key Vaults (to free up names immediately)
           az keyvault purge --name "bl${ENV}${VERSION}storage" || true
           az keyvault purge --name "brisklearning-${ENV}-kv" || true
@@ -293,11 +380,11 @@ jobs:
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
           RG="palash"
-          
+
           echo "Verifying cleanup completion..."
           echo "Remaining resources in resource group:"
           az resource list --resource-group "$RG" --output table || true
-          
+
           echo "Checking for soft-deleted Key Vaults:"
           az keyvault list-deleted --output table || true
 
@@ -310,14 +397,15 @@ jobs:
           echo "**Reason:** Deployment failed, cleaned up partial resources" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Cleanup Phases Completed:" >> $GITHUB_STEP_SUMMARY
-          echo "1. ✅ Terraform destroy attempted" >> $GITHUB_STEP_SUMMARY
-          echo "2. ✅ VMs and compute resources deleted" >> $GITHUB_STEP_SUMMARY
-          echo "3. ✅ Network Interface Cards removed" >> $GITHUB_STEP_SUMMARY
-          echo "4. ✅ Public IPs and NSG associations cleared" >> $GITHUB_STEP_SUMMARY
-          echo "5. ✅ Network Security Groups deleted" >> $GITHUB_STEP_SUMMARY
-          echo "6. ✅ Virtual Networks and subnets removed" >> $GITHUB_STEP_SUMMARY
-          echo "7. ✅ Storage accounts deleted" >> $GITHUB_STEP_SUMMARY
-          echo "8. ✅ Key Vaults deleted and purged" >> $GITHUB_STEP_SUMMARY
+          echo "1. Terraform destroy attempted" >> $GITHUB_STEP_SUMMARY
+          echo "2. State file removed from repository" >> $GITHUB_STEP_SUMMARY
+          echo "3. VMs and compute resources deleted" >> $GITHUB_STEP_SUMMARY
+          echo "4. Network Interface Cards removed" >> $GITHUB_STEP_SUMMARY
+          echo "5. Public IPs and NSG associations cleared" >> $GITHUB_STEP_SUMMARY
+          echo "6. Network Security Groups deleted" >> $GITHUB_STEP_SUMMARY
+          echo "7. Virtual Networks and subnets removed" >> $GITHUB_STEP_SUMMARY
+          echo "8. Storage accounts deleted" >> $GITHUB_STEP_SUMMARY
+          echo "9. Key Vaults deleted and purged" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Next Steps:" >> $GITHUB_STEP_SUMMARY
           echo "- Review deployment logs to identify the failure cause" >> $GITHUB_STEP_SUMMARY
