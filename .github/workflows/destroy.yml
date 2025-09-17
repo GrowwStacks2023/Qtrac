@@ -33,8 +33,12 @@ jobs:
     outputs:
       should-destroy: ${{ steps.validate.outputs.should-destroy }}
       environment: ${{ steps.validate.outputs.environment }}
+      state-exists: ${{ steps.validate.outputs.state-exists }}
     
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
       - name: Validate Destroy Request
         id: validate
         run: |
@@ -45,11 +49,25 @@ jobs:
           fi
           
           ENV="${{ github.event.inputs.environment }}"
+          STATE_FILE="terraform/state/${ENV}.tfstate"
           
           if [[ ! "$ENV" =~ ^(dev|test|prod)$ ]]; then
             echo "Invalid environment: $ENV"
             echo "should-destroy=false" >> $GITHUB_OUTPUT
             exit 1
+          fi
+          
+          # Check if state file exists
+          if [ -f "$STATE_FILE" ]; then
+            echo "Found state file for $ENV environment"
+            echo "state-exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "No state file found for $ENV environment at: $STATE_FILE"
+            echo "This means either:"
+            echo "  1. No resources were deployed for this environment"
+            echo "  2. Resources were already destroyed"
+            echo "  3. Resources were created outside of this workflow"
+            echo "state-exists=false" >> $GITHUB_OUTPUT
           fi
           
           echo "Validation passed"
@@ -66,19 +84,33 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git for State Management
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.5.0
 
-      - name: Terraform Init
-        working-directory: ./terraform
+      - name: Check State File
         run: |
-          terraform init
-          echo "Terraform initialized for ${{ needs.validate-destroy-request.outputs.environment }} environment"
+          ENV="${{ needs.validate-destroy-request.outputs.environment }}"
+          STATE_FILE="terraform/state/${ENV}.tfstate"
+          
+          if [ "${{ needs.validate-destroy-request.outputs.state-exists }}" == "true" ]; then
+            echo "State file found: $STATE_FILE"
+            echo "File size: $(stat -c%s "$STATE_FILE" 2>/dev/null || stat -f%z "$STATE_FILE" 2>/dev/null || echo "unknown") bytes"
+          else
+            echo "No state file found - will attempt manual cleanup"
+          fi
 
       - name: Setup Environment Variables
+        if: needs.validate-destroy-request.outputs.state-exists == 'true'
         working-directory: ./terraform
         run: |
           ENV="${{ needs.validate-destroy-request.outputs.environment }}"
@@ -92,41 +124,196 @@ jobs:
             exit 1
           fi
 
-      - name: Terraform Plan Destroy
+      - name: Terraform Init
         working-directory: ./terraform
         run: |
-          echo "Planning destroy for ${{ needs.validate-destroy-request.outputs.environment }} environment..."
+          terraform init
+          echo "Terraform initialized for ${{ needs.validate-destroy-request.outputs.environment }} environment"
+
+      - name: Load State from Repository
+        if: needs.validate-destroy-request.outputs.state-exists == 'true'
+        working-directory: ./terraform
+        run: |
           ENV="${{ needs.validate-destroy-request.outputs.environment }}"
+          STATE_FILE="state/${ENV}.tfstate"
+          
+          # Copy repo state to local terraform state
+          cp "$STATE_FILE" terraform.tfstate
+          echo "Loaded state from repository"
+          
+          # Show what we're about to destroy
+          echo "Resources in state:"
+          terraform show -no-color | head -20
+
+      - name: Terraform Plan Destroy
+        if: needs.validate-destroy-request.outputs.state-exists == 'true'
+        working-directory: ./terraform
+        run: |
+          ENV="${{ needs.validate-destroy-request.outputs.environment }}"
+          echo "Planning destroy for $ENV environment..."
+          
+          # Note: Using environment and deployment_version variables from the state
           terraform plan -destroy -var-file="environments/$ENV/terraform.tfvars" -out=destroy-plan
           terraform show -no-color destroy-plan > destroy-plan.txt
           echo "Destroy plan completed"
 
       - name: Terraform Destroy
+        if: needs.validate-destroy-request.outputs.state-exists == 'true'
         working-directory: ./terraform
         run: |
-          echo "Destroying ${{ needs.validate-destroy-request.outputs.environment }} environment..."
-          terraform apply -destroy -auto-approve destroy-plan
+          ENV="${{ needs.validate-destroy-request.outputs.environment }}"
+          echo "Destroying $ENV environment resources..."
+          
+          terraform apply -auto-approve destroy-plan
           echo "Infrastructure destroyed successfully"
 
-      - name: Manual Cleanup (if needed)
-        if: failure()
+      - name: Remove State File from Repository
+        if: needs.validate-destroy-request.outputs.state-exists == 'true'
         run: |
-          echo "Terraform destroy failed. Attempting manual cleanup..."
+          ENV="${{ needs.validate-destroy-request.outputs.environment }}"
+          STATE_FILE="terraform/state/${ENV}.tfstate"
+          
+          # Remove state file from repo
+          git rm "$STATE_FILE"
+          git commit -m "Remove Terraform state for $ENV environment after destruction [automated]"
+          git push origin main
+          
+          echo "State file removed from repository"
+
+      - name: Manual Cleanup (No State File)
+        if: needs.validate-destroy-request.outputs.state-exists == 'false'
+        run: |
+          echo "Attempting manual resource cleanup..."
           ENV="${{ needs.validate-destroy-request.outputs.environment }}"
           
-          az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID"
+          # Login to Azure
+          az login --service-principal \
+            -u "$ARM_CLIENT_ID" \
+            -p "$ARM_CLIENT_SECRET" \
+            --tenant "$ARM_TENANT_ID"
           az account set --subscription "$ARM_SUBSCRIPTION_ID"
           
-          echo "Attempting to delete resources for environment: $ENV"
+          echo "Searching for resources with pattern: brisklearning-${ENV}-* and bl${ENV}*"
           
+          # List resources before cleanup
+          echo "Resources found:"
+          az resource list --resource-group "palash" \
+            --query "[?contains(name, 'brisklearning-${ENV}') || contains(name, 'bl${ENV}')].{Name:name, Type:type}" \
+            -o table || true
+          
+          # Attempt cleanup for both naming patterns
+          echo "Cleaning up resources..."
+          
+          # Original naming pattern
           az vm delete --name "brisklearning-${ENV}-vm" --resource-group "palash" --yes || true
           az network nic delete --name "brisklearning-${ENV}-vm-nic" --resource-group "palash" || true
           az network public-ip delete --name "brisklearning-${ENV}-vm-ip" --resource-group "palash" || true
           az network nsg delete --name "brisklearning-${ENV}-vm-nsg" --resource-group "palash" || true
-          az network vnet subnet delete --name "brisklearning-${ENV}-vm-subnet" --vnet-name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
+          az network vnet subnet delete --name "brisklearning-${ENV}-vm-subnet" \
+            --vnet-name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
           az network vnet delete --name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
           az keyvault delete --name "brisklearning-${ENV}-kv" --resource-group "palash" || true
           az keyvault purge --name "brisklearning-${ENV}-kv" || true
           az storage account delete --name "brisklearning${ENV}storage" --resource-group "palash" --yes || true
           
+          # New naming pattern (bl + env + version)
+          for version in v1 v2 v3; do
+            echo "Checking for resources with pattern: bl${ENV}${version}*"
+            az vm delete --name "bl${ENV}${version}vm" --resource-group "palash" --yes || true
+            az network nic delete --name "bl${ENV}${version}nic" --resource-group "palash" || true
+            az network public-ip delete --name "bl${ENV}${version}ip" --resource-group "palash" || true
+            az network nsg delete --name "bl${ENV}${version}nsg" --resource-group "palash" || true
+            az network vnet subnet delete --name "bl${ENV}${version}subnet" \
+              --vnet-name "bl${ENV}${version}vnet" --resource-group "palash" || true
+            az network vnet delete --name "bl${ENV}${version}vnet" --resource-group "palash" || true
+            az keyvault delete --name "bl${ENV}${version}kv" --resource-group "palash" || true
+            az keyvault purge --name "bl${ENV}${version}kv" || true
+            az storage account delete --name "bl${ENV}${version}storage" --resource-group "palash" --yes || true
+          done
+          
+          echo "Manual cleanup completed"
+
+      - name: Manual Cleanup (Terraform Failed)
+        if: failure() && needs.validate-destroy-request.outputs.state-exists == 'true'
+        run: |
+          echo "Terraform destroy failed. Attempting manual cleanup..."
+          ENV="${{ needs.validate-destroy-request.outputs.environment }}"
+          
+          # Login to Azure
+          az login --service-principal \
+            -u "$ARM_CLIENT_ID" \
+            -p "$ARM_CLIENT_SECRET" \
+            --tenant "$ARM_TENANT_ID"
+          az account set --subscription "$ARM_SUBSCRIPTION_ID"
+          
+          echo "Searching for resources to clean up..."
+          az resource list --resource-group "palash" \
+            --query "[?contains(name, 'brisklearning-${ENV}') || contains(name, 'bl${ENV}')].{Name:name, Type:type}" \
+            -o table || true
+          
+          # Same cleanup logic as above
+          az vm delete --name "brisklearning-${ENV}-vm" --resource-group "palash" --yes || true
+          az network nic delete --name "brisklearning-${ENV}-vm-nic" --resource-group "palash" || true
+          az network public-ip delete --name "brisklearning-${ENV}-vm-ip" --resource-group "palash" || true
+          az network nsg delete --name "brisklearning-${ENV}-vm-nsg" --resource-group "palash" || true
+          az network vnet subnet delete --name "brisklearning-${ENV}-vm-subnet" \
+            --vnet-name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
+          az network vnet delete --name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
+          az keyvault delete --name "brisklearning-${ENV}-kv" --resource-group "palash" || true
+          az keyvault purge --name "brisklearning-${ENV}-kv" || true
+          az storage account delete --name "brisklearning${ENV}storage" --resource-group "palash" --yes || true
+          
+          for version in v1 v2 v3; do
+            az vm delete --name "bl${ENV}${version}vm" --resource-group "palash" --yes || true
+            az network nic delete --name "bl${ENV}${version}nic" --resource-group "palash" || true
+            az network public-ip delete --name "bl${ENV}${version}ip" --resource-group "palash" || true
+            az network nsg delete --name "bl${ENV}${version}nsg" --resource-group "palash" || true
+            az network vnet subnet delete --name "bl${ENV}${version}subnet" \
+              --vnet-name "bl${ENV}${version}vnet" --resource-group "palash" || true
+            az network vnet delete --name "bl${ENV}${version}vnet" --resource-group "palash" || true
+            az keyvault delete --name "bl${ENV}${version}kv" --resource-group "palash" || true
+            az keyvault purge --name "bl${ENV}${version}kv" || true
+            az storage account delete --name "bl${ENV}${version}storage" --resource-group "palash" --yes || true
+          done
+          
+          # Remove state file even after manual cleanup
+          ENV="${{ needs.validate-destroy-request.outputs.environment }}"
+          STATE_FILE="terraform/state/${ENV}.tfstate"
+          if [ -f "$STATE_FILE" ]; then
+            git rm "$STATE_FILE" || true
+            git commit -m "Remove Terraform state for $ENV environment after manual cleanup [automated]" || true
+            git push origin main || true
+          fi
+          
           echo "Manual cleanup attempted."
+
+      - name: Destruction Summary
+        if: always()
+        run: |
+          echo "## Destruction Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ needs.validate-destroy-request.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Destruction Time:** $(date)" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.validate-destroy-request.outputs.state-exists }}" == "true" ]; then
+            echo "**Method:** Terraform destroy with state file" >> $GITHUB_STEP_SUMMARY
+            echo "**State File:** Removed from repository after destruction" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Method:** Manual cleanup (no state file found)" >> $GITHUB_STEP_SUMMARY
+            echo "**State File:** No state file was present" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### What Was Destroyed:" >> $GITHUB_STEP_SUMMARY
+          echo "- Virtual Machine and compute resources" >> $GITHUB_STEP_SUMMARY
+          echo "- Network interfaces and public IPs" >> $GITHUB_STEP_SUMMARY
+          echo "- Network security groups and rules" >> $GITHUB_STEP_SUMMARY
+          echo "- Virtual networks and subnets" >> $GITHUB_STEP_SUMMARY
+          echo "- Storage accounts and containers" >> $GITHUB_STEP_SUMMARY
+          echo "- Key Vaults (deleted and purged)" >> $GITHUB_STEP_SUMMARY
+          echo "- Terraform state file (removed from repository)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Result:" >> $GITHUB_STEP_SUMMARY
+          echo "- All ${{ needs.validate-destroy-request.outputs.environment }} environment resources have been removed" >> $GITHUB_STEP_SUMMARY
+          echo "- No ongoing Azure costs for this environment" >> $GITHUB_STEP_SUMMARY
+          echo "- Resource names are freed up for reuse" >> $GITHUB_STEP_SUMMARY
+          echo "- Ready for fresh deployment if needed" >> $GITHUB_STEP_SUMMARY
