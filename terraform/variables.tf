@@ -1,4 +1,4 @@
-# Environment Variables
+# Environment Variables 
 variable "environment" {
   description = "Environment name (dev, test, prod)"
   type        = string
@@ -11,7 +11,7 @@ variable "environment" {
 variable "location" {
   description = "Azure region for resource deployment"
   type        = string
-  default     = "centralindia"
+  default     = "southeastasia"  # Updated to match your deployment
 }
 
 variable "resource_group_name" {
@@ -30,7 +30,7 @@ variable "project_name" {
 variable "vm_size" {
   description = "Size of the virtual machine"
   type        = string
-  default     = "Standard_D4s_v3"  # Increased for processing workload
+  default     = "Standard_D4s_v3"
 }
 
 variable "admin_username" {
@@ -49,7 +49,7 @@ variable "storage_account_tier" {
 variable "storage_replication_type" {
   description = "Storage account replication type"
   type        = string
-  default     = "LRS"
+  default     = "GRS"  # Updated to match your deployment
 }
 
 # Key Vault Configuration
@@ -69,13 +69,13 @@ variable "purge_protection_enabled" {
 variable "vnet_address_space" {
   description = "Address space for virtual network"
   type        = list(string)
-  default     = ["10.0.0.0/16"]
+  default     = ["10.1.0.0/16"]  # Updated to match your deployment
 }
 
 variable "subnet_address_prefix" {
   description = "Address prefix for subnet"
   type        = list(string)
-  default     = ["10.0.1.0/24"]
+  default     = ["10.1.1.0/24"]  # Updated to match your deployment
 }
 
 # EXISTING PostgreSQL Server Configuration (External)
@@ -131,8 +131,10 @@ variable "common_tags" {
     Project      = "BriskLearning"
     ManagedBy    = "terraform"
     Purpose      = "data-processing"
+    Owner        = "developergrowwstacks"
   }
 }
+
 # Deployment Version for Resource Naming
 variable "deployment_version" {
   description = "Version suffix to avoid resource conflicts (e.g., v1, v2, v3)"
