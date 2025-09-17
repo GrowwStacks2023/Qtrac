@@ -164,7 +164,7 @@ jobs:
           cp terraform.tfstate "$STATE_FILE"
           
           # Add and commit state file
-          git add "$STATE_FILE"
+          git add -f "$STATE_FILE"
           git commit -m "Update Terraform state for $ENV environment [automated]" || echo "No state changes to commit"
           git push origin main
           
