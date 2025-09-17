@@ -17,6 +17,11 @@ on:
         - dev
         - test  
         - prod
+      deployment_version:
+        description: 'Deployment version (v1, v2, v3, etc.)'
+        required: false
+        default: 'v1'
+        type: string
 
 env:
   ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -30,6 +35,7 @@ jobs:
     outputs:
       target-environment: ${{ steps.parse-trigger.outputs.environment }}
       should-deploy: ${{ steps.parse-trigger.outputs.should-deploy }}
+      deployment-version: ${{ steps.parse-trigger.outputs.deployment-version }}
     
     steps:
       - name: Checkout Repository
@@ -40,6 +46,7 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.environment }}" != "" ]; then
             echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+            echo "deployment-version=${{ github.event.inputs.deployment_version || 'v1' }}" >> $GITHUB_OUTPUT
             echo "should-deploy=true" >> $GITHUB_OUTPUT
             echo "Manual deployment to ${{ github.event.inputs.environment }}"
           elif [ -f deploy-trigger.txt ]; then
@@ -47,6 +54,7 @@ jobs:
             if [ -n "$LATEST_LINE" ]; then
               TARGET_ENV=$(echo "$LATEST_LINE" | cut -d':' -f1 | tr '[:upper:]' '[:lower:]')
               echo "environment=$TARGET_ENV" >> $GITHUB_OUTPUT
+              echo "deployment-version=v1" >> $GITHUB_OUTPUT
               echo "should-deploy=true" >> $GITHUB_OUTPUT
               echo "Deploying to $TARGET_ENV via trigger file"
             else
@@ -79,7 +87,10 @@ jobs:
         working-directory: ./terraform
         run: |
           terraform workspace select ${{ needs.detect-environment.outputs.target-environment }} || terraform workspace new ${{ needs.detect-environment.outputs.target-environment }}
-          terraform plan -var-file="environments/${{ needs.detect-environment.outputs.target-environment }}/terraform.tfvars" -out=tfplan
+          terraform plan \
+            -var="environment=${{ needs.detect-environment.outputs.target-environment }}" \
+            -var="deployment_version=${{ needs.detect-environment.outputs.deployment-version }}" \
+            -out=tfplan
 
       - name: Terraform Apply
         working-directory: ./terraform
@@ -97,6 +108,7 @@ jobs:
         run: |
           echo "## Deployment Complete!" >> $GITHUB_STEP_SUMMARY
           echo "**Environment:** ${{ needs.detect-environment.outputs.target-environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Deployment Version:** ${{ needs.detect-environment.outputs.deployment-version }}" >> $GITHUB_STEP_SUMMARY
           echo "**VM IP:** ${{ steps.terraform-outputs.outputs.vm_public_ip }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### DNS Records to Configure:" >> $GITHUB_STEP_SUMMARY
@@ -135,71 +147,180 @@ jobs:
 
       - name: Terraform Destroy Failed Resources
         working-directory: ./terraform
+        continue-on-error: true
         run: |
-          echo "Deployment failed. Cleaning up partially created resources..."
+          echo "Deployment failed. Running terraform destroy..."
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
           
-          # Attempt terraform destroy first
-          terraform destroy -var-file="environments/$ENV/terraform.tfvars" -auto-approve || echo "Terraform destroy completed with some errors"
+          terraform destroy \
+            -var="environment=$ENV" \
+            -var="deployment_version=$VERSION" \
+            -auto-approve || echo "Terraform destroy completed with some errors"
 
-      - name: Manual Azure Cleanup
+      - name: Azure Login for Manual Cleanup
         run: |
-          echo "Performing manual cleanup of any remaining resources..."
-          ENV="${{ needs.detect-environment.outputs.target-environment }}"
-          
-          # Login to Azure
+          echo "Logging into Azure for manual cleanup..."
           az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID"
           az account set --subscription "$ARM_SUBSCRIPTION_ID"
+          az account show
+
+      - name: Manual Cleanup - Phase 1 (VM and Dependencies)
+        continue-on-error: true
+        run: |
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
+          RG="palash"
           
-          # Delete resources that might exist
-          echo "Cleaning up resources for environment: $ENV"
+          echo "Phase 1: Cleaning up VMs and compute resources..."
           
-          # VM and related resources
-          az vm delete --name "brisklearning-${ENV}-vm" --resource-group "palash" --yes || true
-          az vm delete --name "brisklearning-${ENV}-v1-vm" --resource-group "palash" --yes || true
+          # Delete VMs first (this releases NIC associations)
+          az vm delete --name "brisklearning-${ENV}-vm" --resource-group "$RG" --yes --no-wait || true
+          az vm delete --name "bl${ENV}${VERSION}vm" --resource-group "$RG" --yes --no-wait || true
           
-          # Network resources
-          az network nic delete --name "brisklearning-${ENV}-vm-nic" --resource-group "palash" || true
-          az network nic delete --name "brisklearning-${ENV}-v1-vm-nic" --resource-group "palash" || true
+          echo "Waiting 30 seconds for VM deletion to process..."
+          sleep 30
+
+      - name: Manual Cleanup - Phase 2 (Network Interface Cards)
+        continue-on-error: true
+        run: |
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
+          RG="palash"
           
-          az network public-ip delete --name "brisklearning-${ENV}-vm-ip" --resource-group "palash" || true
-          az network public-ip delete --name "brisklearning-${ENV}-v1-vm-ip" --resource-group "palash" || true
+          echo "Phase 2: Cleaning up Network Interface Cards..."
           
-          az network nsg delete --name "brisklearning-${ENV}-vm-nsg" --resource-group "palash" || true
-          az network nsg delete --name "brisklearning-${ENV}-v1-vm-nsg" --resource-group "palash" || true
+          # Delete NICs (this releases public IP associations)
+          az network nic delete --name "brisklearning-${ENV}-vm-nic" --resource-group "$RG" --no-wait || true
+          az network nic delete --name "bl${ENV}${VERSION}nic" --resource-group "$RG" --no-wait || true
           
-          # Subnets and VNets
-          az network vnet subnet delete --name "brisklearning-${ENV}-vm-subnet" --vnet-name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
-          az network vnet subnet delete --name "brisklearning-${ENV}-v1-vm-subnet" --vnet-name "brisklearning-${ENV}-v1-vnet" --resource-group "palash" || true
+          echo "Waiting 30 seconds for NIC deletion to process..."
+          sleep 30
+
+      - name: Manual Cleanup - Phase 3 (Public IPs and NSG Associations)
+        continue-on-error: true
+        run: |
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
+          RG="palash"
           
-          az network vnet delete --name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
-          az network vnet delete --name "brisklearning-${ENV}-v1-vnet" --resource-group "palash" || true
+          echo "Phase 3: Cleaning up Public IPs and NSG associations..."
           
-          # Key Vaults
-          az keyvault delete --name "brisklearning-${ENV}-kv" --resource-group "palash" || true
-          az keyvault delete --name "brisklearning-${ENV}-v1-kv" --resource-group "palash" || true
+          # Delete public IPs
+          az network public-ip delete --name "brisklearning-${ENV}-vm-ip" --resource-group "$RG" || true
+          az network public-ip delete --name "bl${ENV}${VERSION}ip" --resource-group "$RG" || true
+          
+          # Remove NSG associations from subnets
+          SUBNET_ID="/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RG/providers/Microsoft.Network/virtualNetworks/brisklearning-${ENV}-vnet/subnets/brisklearning-${ENV}-vm-subnet"
+          az network vnet subnet update --ids "$SUBNET_ID" --network-security-group "" || true
+          
+          SUBNET_ID_V2="/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RG/providers/Microsoft.Network/virtualNetworks/bl${ENV}${VERSION}vnet/subnets/bl${ENV}${VERSION}subnet"
+          az network vnet subnet update --ids "$SUBNET_ID_V2" --network-security-group "" || true
+          
+          echo "Waiting 30 seconds for NSG disassociation..."
+          sleep 30
+
+      - name: Manual Cleanup - Phase 4 (Network Security Groups)
+        continue-on-error: true
+        run: |
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
+          RG="palash"
+          
+          echo "Phase 4: Cleaning up Network Security Groups..."
+          
+          # Delete NSGs (now that they're not associated)
+          az network nsg delete --name "brisklearning-${ENV}-vm-nsg" --resource-group "$RG" || true
+          az network nsg delete --name "bl${ENV}${VERSION}nsg" --resource-group "$RG" || true
+
+      - name: Manual Cleanup - Phase 5 (Virtual Networks)
+        continue-on-error: true
+        run: |
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
+          RG="palash"
+          
+          echo "Phase 5: Cleaning up Virtual Networks and Subnets..."
+          
+          # Delete subnets first, then VNets
+          az network vnet subnet delete --name "brisklearning-${ENV}-vm-subnet" \
+            --vnet-name "brisklearning-${ENV}-vnet" --resource-group "$RG" || true
+          az network vnet subnet delete --name "bl${ENV}${VERSION}subnet" \
+            --vnet-name "bl${ENV}${VERSION}vnet" --resource-group "$RG" || true
+          
+          az network vnet delete --name "brisklearning-${ENV}-vnet" --resource-group "$RG" || true
+          az network vnet delete --name "bl${ENV}${VERSION}vnet" --resource-group "$RG" || true
+
+      - name: Manual Cleanup - Phase 6 (Storage Accounts)
+        continue-on-error: true
+        run: |
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
+          RG="palash"
+          
+          echo "Phase 6: Cleaning up Storage Accounts..."
+          
+          # Delete storage accounts (these also delete all containers)
+          az storage account delete --name "bl${ENV}${VERSION}storage" --resource-group "$RG" --yes || true
+          az storage account delete --name "brisklearning${ENV}storage" --resource-group "$RG" --yes || true
+          az storage account delete --name "bltestv1storage" --resource-group "$RG" --yes || true
+
+      - name: Manual Cleanup - Phase 7 (Key Vaults)
+        continue-on-error: true
+        run: |
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
+          RG="palash"
+          
+          echo "Phase 7: Cleaning up Key Vaults..."
+          
+          # Delete Key Vaults
+          az keyvault delete --name "bl${ENV}${VERSION}storage" --resource-group "$RG" || true
+          az keyvault delete --name "brisklearning-${ENV}-kv" --resource-group "$RG" || true
+          az keyvault delete --name "bltestv1storage" --resource-group "$RG" || true
+          
+          echo "Waiting 60 seconds before purging Key Vaults..."
+          sleep 60
+          
+          # Purge Key Vaults (to free up names immediately)
+          az keyvault purge --name "bl${ENV}${VERSION}storage" || true
           az keyvault purge --name "brisklearning-${ENV}-kv" || true
-          az keyvault purge --name "brisklearning-${ENV}-v1-kv" || true
+          az keyvault purge --name "bltestv1storage" || true
+
+      - name: Cleanup Verification
+        continue-on-error: true
+        run: |
+          ENV="${{ needs.detect-environment.outputs.target-environment }}"
+          VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
+          RG="palash"
           
-          # Storage Accounts
-          az storage account delete --name "brisklearning${ENV}storage" --resource-group "palash" --yes || true
-          az storage account delete --name "brisklearning${ENV}v1storage" --resource-group "palash" --yes || true
+          echo "Verifying cleanup completion..."
+          echo "Remaining resources in resource group:"
+          az resource list --resource-group "$RG" --output table || true
           
-          echo "Cleanup completed. Some resources may require manual intervention."
+          echo "Checking for soft-deleted Key Vaults:"
+          az keyvault list-deleted --output table || true
 
       - name: Cleanup Summary
         run: |
           echo "## Cleanup Completed!" >> $GITHUB_STEP_SUMMARY
           echo "**Environment:** ${{ needs.detect-environment.outputs.target-environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Deployment Version:** ${{ needs.detect-environment.outputs.deployment-version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Cleanup Time:** $(date)" >> $GITHUB_STEP_SUMMARY
           echo "**Reason:** Deployment failed, cleaned up partial resources" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Actions Taken:" >> $GITHUB_STEP_SUMMARY
-          echo "- Ran terraform destroy on failed deployment" >> $GITHUB_STEP_SUMMARY
-          echo "- Manually cleaned up remaining Azure resources" >> $GITHUB_STEP_SUMMARY
-          echo "- Removed both versioned and non-versioned resources" >> $GITHUB_STEP_SUMMARY
+          echo "### Cleanup Phases Completed:" >> $GITHUB_STEP_SUMMARY
+          echo "1. ✅ Terraform destroy attempted" >> $GITHUB_STEP_SUMMARY
+          echo "2. ✅ VMs and compute resources deleted" >> $GITHUB_STEP_SUMMARY
+          echo "3. ✅ Network Interface Cards removed" >> $GITHUB_STEP_SUMMARY
+          echo "4. ✅ Public IPs and NSG associations cleared" >> $GITHUB_STEP_SUMMARY
+          echo "5. ✅ Network Security Groups deleted" >> $GITHUB_STEP_SUMMARY
+          echo "6. ✅ Virtual Networks and subnets removed" >> $GITHUB_STEP_SUMMARY
+          echo "7. ✅ Storage accounts deleted" >> $GITHUB_STEP_SUMMARY
+          echo "8. ✅ Key Vaults deleted and purged" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Next Steps:" >> $GITHUB_STEP_SUMMARY
           echo "- Review deployment logs to identify the failure cause" >> $GITHUB_STEP_SUMMARY
-          echo "- Fix the issue and retry deployment" >> $GITHUB_STEP_SUMMARY
-          echo "- Resources are cleaned up, no ongoing costs" >> $GITHUB_STEP_SUMMARY
+          echo "- Consider using a different deployment version (e.g., v2, v3)" >> $GITHUB_STEP_SUMMARY
+          echo "- All resources cleaned up, no ongoing Azure costs" >> $GITHUB_STEP_SUMMARY
+          echo "- Resource names are freed up for reuse" >> $GITHUB_STEP_SUMMARY
