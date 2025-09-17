@@ -18,11 +18,13 @@ output "virtual_network_id" {
 output "postgres_host" {
   description = "PostgreSQL server hostname"
   value       = var.postgres_host
+  sensitive   = true
 }
 
 output "postgres_database" {
   description = "PostgreSQL database name"
   value       = var.postgres_database
+  sensitive   = true
 }
 
 output "postgres_user" {
@@ -83,6 +85,7 @@ output "ssh_connection_command" {
 output "postgres_connection_test" {
   description = "Command to test PostgreSQL connection from VM"
   value       = "psql -h ${var.postgres_host} -U ${var.postgres_user} -d ${var.postgres_database} -c 'SELECT version();'"
+  sensitive   = true
 }
 
 # DNS Configuration Commands
