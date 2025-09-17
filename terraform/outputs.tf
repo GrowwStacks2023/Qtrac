@@ -17,17 +17,17 @@ output "virtual_network_id" {
 # PostgreSQL Outputs (Existing Server)
 output "postgres_host" {
   description = "PostgreSQL server hostname"
-  value       = var.existing_postgres_host
+  value       = var.postgres_host
 }
 
 output "postgres_database" {
   description = "PostgreSQL database name"
-  value       = var.existing_postgres_database
+  value       = var.postgres_database
 }
 
 output "postgres_user" {
   description = "PostgreSQL username"
-  value       = var.existing_postgres_user
+  value       = var.postgres_user
   sensitive   = true
 }
 
@@ -76,28 +76,23 @@ output "health_check_url" {
 
 # Connection Information
 output "ssh_connection_command" {
-  description = "SSH command to connect to the VM"
-  value       = "ssh -i ~/.ssh/vm_key ${var.admin_username}@${azurerm_public_ip.main_vm_ip.ip_address}"
-}
-
-output "ssh_key_retrieval_command" {
-  description = "Command to retrieve SSH private key from Key Vault"
-  value       = "az keyvault secret show --vault-name ${azurerm_key_vault.main_keyvault.name} --name vm-ssh-private-key --query value -o tsv > ~/.ssh/vm_key && chmod 600 ~/.ssh/vm_key"
+  description = "SSH command to connect to the VM (using password auth)"
+  value       = "ssh ${var.admin_username}@${azurerm_public_ip.main_vm_ip.ip_address}"
 }
 
 output "postgres_connection_test" {
   description = "Command to test PostgreSQL connection from VM"
-  value       = "psql -h ${var.existing_postgres_host} -U ${var.existing_postgres_user} -d ${var.existing_postgres_database} -c 'SELECT version();'"
+  value       = "psql -h ${var.postgres_host} -U ${var.postgres_user} -d ${var.postgres_database} -c 'SELECT version();'"
 }
 
 # DNS Configuration Commands
 output "dns_configuration_commands" {
-  description = "DNS records that need to be configured for brisklearning.com"
+  description = "DNS records that need to be configured for your domain"
   value = {
-    "main_a_record" = "Create A record: ${var.environment}.brisklearning.com -> ${azurerm_public_ip.main_vm_ip.ip_address}"
-    "n8n_a_record" = "Create A record: n8n.${var.environment}.brisklearning.com -> ${azurerm_public_ip.main_vm_ip.ip_address}"
-    "api_a_record" = "Create A record: api.${var.environment}.brisklearning.com -> ${azurerm_public_ip.main_vm_ip.ip_address}"
-    "root_redirect" = "Create A record (prod only): brisklearning.com -> ${azurerm_public_ip.main_vm_ip.ip_address}"
+    "main_a_record" = "Create A record: ${var.environment}.${var.domain_name} -> ${azurerm_public_ip.main_vm_ip.ip_address}"
+    "n8n_a_record" = "Create A record: n8n.${var.environment}.${var.domain_name} -> ${azurerm_public_ip.main_vm_ip.ip_address}"
+    "api_a_record" = "Create A record: api.${var.environment}.${var.domain_name} -> ${azurerm_public_ip.main_vm_ip.ip_address}"
+    "root_redirect" = "Create A record (prod only): ${var.domain_name} -> ${azurerm_public_ip.main_vm_ip.ip_address}"
   }
 }
 
@@ -105,8 +100,7 @@ output "dns_configuration_commands" {
 output "key_vault_secrets_stored" {
   description = "List of secrets stored in Key Vault"
   value = [
-    "vm-ssh-private-key",
-    "vm-ssh-public-key", 
+    "vm-admin-password",
     "postgres-host",
     "postgres-user",
     "postgres-password",
@@ -119,13 +113,15 @@ output "key_vault_secrets_stored" {
 output "setup_verification_commands" {
   description = "Commands to verify BriskLearning setup"
   value = {
-    "1_connect_to_vm" = "ssh -i ~/.ssh/vm_key ${var.admin_username}@${azurerm_public_ip.main_vm_ip.ip_address}"
+    "1_connect_to_vm" = "ssh ${var.admin_username}@${azurerm_public_ip.main_vm_ip.ip_address}"
     "2_check_services" = "docker ps"
     "3_view_logs" = "docker-compose logs -f"
-    "4_test_postgres" = "docker exec file-processor psql $PGHOST -U $PGUSER -d $PGDATABASE -c 'SELECT version();'"
+    "4_test_postgres" = "docker exec file-processor psql $POSTGRES_CONNECTION -c 'SELECT version();'"
     "5_check_n8n" = "curl -I https://n8n.${var.environment}.${var.domain_name}"
     "6_test_webhook" = "curl -X POST https://api.${var.environment}.${var.domain_name}/webhook/test"
     "7_health_check" = "curl http://${azurerm_public_ip.main_vm_ip.ip_address}:8080/health"
+    "8_check_cloud_init" = "tail -f /var/log/cloud-init-output.log"
+    "9_check_setup_logs" = "tail -f /var/log/brisklearning-setup.log"
   }
 }
 
@@ -134,10 +130,12 @@ output "environment_info" {
   description = "Environment-specific configuration details"
   value = {
     "environment" = var.environment
+    "deployment_version" = var.deployment_version
     "domain_pattern" = "${var.environment}.${var.domain_name}"
     "vm_size" = var.vm_size
     "storage_tier" = var.storage_account_tier
     "n8n_credentials" = "admin / BriskLearning2024!"
+    "vm_admin_username" = var.admin_username
   }
 }
 
@@ -150,4 +148,17 @@ output "resource_group_name" {
 output "resource_group_location" {
   description = "Location of the resource group"
   value       = data.azurerm_resource_group.main.location
+}
+
+# Resource Naming Information
+output "resource_naming_info" {
+  description = "Information about how resources are named in this deployment"
+  value = {
+    "vm_name" = azurerm_linux_virtual_machine.main_vm.name
+    "storage_account" = azurerm_storage_account.main_storage.name
+    "key_vault" = azurerm_key_vault.main_keyvault.name
+    "virtual_network" = azurerm_virtual_network.main_vnet.name
+    "public_ip" = azurerm_public_ip.main_vm_ip.name
+    "network_security_group" = azurerm_network_security_group.vm_nsg.name
+  }
 }
