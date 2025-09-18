@@ -9,8 +9,8 @@ vm_size = "Standard_D4s_v3"  # Medium size for test
 admin_username = "azureuser"
 
 # Domain Configuration
-domain_name = "brisklearning.com"
-ssl_email = "admin@brisklearning.com"
+domain_name = "developmentenvironment.brisklearning.com"
+ssl_email = "arslanur.rehman@growwstacks.com"
 
 # Existing PostgreSQL Configuration (SECURE - Use Key Vault in production)
 existing_postgres_host = "scannedfiles.postgres.database.azure.com"
