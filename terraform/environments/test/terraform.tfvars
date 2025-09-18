@@ -2,7 +2,7 @@
 environment = "test"
 project_name = "brisklearning"
 location = "southeastasia"  # Changed from centralindia to avoid quota issues
-resource_group_name = "palash"
+resource_group_name = "arslan"
 
 # VM Configuration
 vm_size = "Standard_D4s_v3"  # Medium size for test

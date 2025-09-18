@@ -9,6 +9,12 @@ terraform {
       version = "~> 4.0"
     }
   }
+  
+  # Backend configuration - this will be overridden by backend.tf created by workflow
+  backend "azurerm" {
+    # These values will be provided by the workflow via backend.tf
+    # or via terraform init -backend-config parameters
+  }
 }
 
 provider "azurerm" {
@@ -43,7 +49,7 @@ resource "azurerm_subnet" "vm_subnet" {
   name                 = "${var.project_name}-${var.environment}-vm-subnet"
   resource_group_name  = data.azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.main_vnet.name
-  address_prefixes = var.subnet_address_prefix
+  address_prefixes     = var.subnet_address_prefix
 }
 
 # Network Security Group for VMs
@@ -117,6 +123,32 @@ resource "azurerm_network_security_group" "vm_nsg" {
     destination_address_prefix = "*"
   }
 
+  # File Processor API port
+  security_rule {
+    name                       = "FileProcessorAPI"
+    priority                   = 1006
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "8000"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  # Health check port
+  security_rule {
+    name                       = "HealthCheck"
+    priority                   = 1007
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "8080"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
   tags = merge(var.common_tags, {
     Environment = var.environment
     Name        = "${var.project_name}-${var.environment}-vm-nsg"
@@ -164,7 +196,7 @@ resource "azurerm_network_interface" "main_vm_nic" {
 
 # Key Vault for storing secrets
 resource "azurerm_key_vault" "main_keyvault" {
-  name = "bl${var.environment}${var.deployment_version}storage"
+  name                = "bl${var.environment}${var.deployment_version}storage"
   location            = var.location
   resource_group_name = data.azurerm_resource_group.main.name
   tenant_id           = "f1845ecc-10c8-4389-a2d1-e5f8d7326bfd"
@@ -191,7 +223,7 @@ resource "azurerm_key_vault" "main_keyvault" {
 
 # Storage Account for file processing
 resource "azurerm_storage_account" "main_storage" {
-  name = "bl${var.environment}${var.deployment_version}storage"
+  name                     = "bl${var.environment}${var.deployment_version}storage"
   resource_group_name      = data.azurerm_resource_group.main.name
   location                 = var.location
   account_tier             = var.storage_account_tier
@@ -336,15 +368,15 @@ resource "azurerm_linux_virtual_machine" "main_vm" {
   # Custom data script to install Docker, n8n, ClamAV, and Caddy
   custom_data = base64encode(templatefile("${path.module}/cloud-init.yml", {
     postgres_connection_string = "postgresql://${var.postgres_user}:${var.postgres_password}@${var.postgres_host}:${var.postgres_port}/${var.postgres_database}?sslmode=require"
-    postgres_host = var.postgres_host
-    postgres_user = var.postgres_user
+    postgres_host     = var.postgres_host
+    postgres_user     = var.postgres_user
     postgres_password = var.postgres_password
     postgres_database = var.postgres_database
-    postgres_port = var.postgres_port
+    postgres_port     = var.postgres_port
     storage_account_name = azurerm_storage_account.main_storage.name
-    storage_account_key = azurerm_storage_account.main_storage.primary_access_key
+    storage_account_key  = azurerm_storage_account.main_storage.primary_access_key
     domain_name = var.domain_name
-    ssl_email = var.ssl_email
+    ssl_email   = var.ssl_email
     environment = var.environment
   }))
 

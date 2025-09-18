@@ -1,7 +1,9 @@
 # BriskLearning Complete Deployment Guide
 
 ## Overview
+
 This guide will deploy a complete data processing infrastructure for BriskLearning with:
+
 - Environment-specific subdomains (dev/test/prod.brisklearning.com)
 - Automatic SSL certificates via Caddy
 - Integration with existing PostgreSQL server (scannedfiles.postgres.database.azure.com)
@@ -11,12 +13,13 @@ This guide will deploy a complete data processing infrastructure for BriskLearni
 ## Prerequisites
 
 ### 1. Domain Configuration
+
 **Configure DNS records for brisklearning.com BEFORE deployment:**
 
 ```dns
 # After getting VM IP from terraform output, create these A records:
 dev.brisklearning.com      → YOUR_VM_IP
-test.brisklearning.com     → YOUR_VM_IP  
+test.brisklearning.com     → YOUR_VM_IP
 prod.brisklearning.com     → YOUR_VM_IP
 n8n.dev.brisklearning.com  → YOUR_VM_IP
 n8n.test.brisklearning.com → YOUR_VM_IP
@@ -27,6 +30,7 @@ api.prod.brisklearning.com → YOUR_VM_IP
 ```
 
 ### 2. Azure Setup
+
 ```bash
 # Install Azure CLI and Terraform
 curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
@@ -42,9 +46,10 @@ az ad sp create-for-rbac --name "brisklearning-terraform-sp" --role "Contributor
 ```
 
 ### 3. Set Environment Variables
+
 ```bash
 export ARM_CLIENT_ID="your-app-id"
-export ARM_CLIENT_SECRET="your-password"  
+export ARM_CLIENT_SECRET="your-password"
 export ARM_SUBSCRIPTION_ID="0c8d18ae-4640-4da5-9ca9-6684d674951a"
 export ARM_TENANT_ID="f1845ecc-10c8-4389-a2d1-e5f8d7326bfd"
 ```
@@ -52,7 +57,9 @@ export ARM_TENANT_ID="f1845ecc-10c8-4389-a2d1-e5f8d7326bfd"
 ## Step-by-Step Deployment
 
 ### Step 1: Project Structure
+
 Create the following directory structure:
+
 ```
 brisklearning-infrastructure/
 ├── terraform/
@@ -73,9 +80,11 @@ brisklearning-infrastructure/
 ```
 
 ### Step 2: Environment Configuration Files
+
 Use the terraform.tfvars files provided for each environment (dev, test, prod).
 
 **SECURITY NOTE**: In production, move the postgres password to Key Vault:
+
 ```bash
 az keyvault secret set --vault-name "brisklearning-dev-kv" --name "postgres-password" --value "palash2003@"
 ```
@@ -83,6 +92,7 @@ az keyvault secret set --vault-name "brisklearning-dev-kv" --name "postgres-pass
 ### Step 3: Deploy Infrastructure
 
 **For Development Environment:**
+
 ```bash
 cd terraform/environments/dev
 terraform init
@@ -95,6 +105,7 @@ echo "VM IP: $VM_IP"
 ```
 
 **For Test Environment:**
+
 ```bash
 cd ../test
 terraform init
@@ -103,6 +114,7 @@ terraform apply
 ```
 
 **For Production Environment:**
+
 ```bash
 cd ../prod
 terraform init
@@ -111,7 +123,9 @@ terraform apply
 ```
 
 ### Step 4: Configure DNS Records
+
 After getting the VM IP, configure your DNS:
+
 ```bash
 # Replace YOUR_VM_IP with the actual IP from terraform output
 # Configure these in your domain registrar's DNS management:
@@ -121,6 +135,7 @@ api.dev.brisklearning.com → YOUR_VM_IP
 ```
 
 ### Step 5: Verify Deployment
+
 ```bash
 # Get SSH key and connect
 az keyvault secret show --vault-name brisklearning-dev-kv --name vm-ssh-private-key --query value -o tsv > ~/.ssh/vm_key
@@ -133,6 +148,7 @@ docker-compose logs -f
 ```
 
 ### Step 6: Test Services
+
 ```bash
 # Test health endpoint
 curl http://$VM_IP:8080/health
@@ -147,17 +163,20 @@ curl -I https://n8n.dev.brisklearning.com
 ## Service Access Points
 
 ### Development Environment:
+
 - **Main Site**: https://dev.brisklearning.com
 - **n8n Interface**: https://n8n.dev.brisklearning.com (admin / BriskLearning2024!)
 - **API Webhooks**: https://api.dev.brisklearning.com/webhook/
 - **Health Check**: http://VM_IP:8080/health
 
 ### Test Environment:
-- **Main Site**: https://test.brisklearning.com  
+
+- **Main Site**: https://test.brisklearning.com
 - **n8n Interface**: https://n8n.test.brisklearning.com
 - **API Webhooks**: https://api.test.brisklearning.com/webhook/
 
 ### Production Environment:
+
 - **Main Site**: https://brisklearning.com (redirects to https://prod.brisklearning.com)
 - **n8n Interface**: https://n8n.prod.brisklearning.com
 - **API Webhooks**: https://api.prod.brisklearning.com/webhook/
@@ -165,6 +184,7 @@ curl -I https://n8n.dev.brisklearning.com
 ## Database Integration
 
 ### PostgreSQL Connection Details:
+
 - **Host**: scannedfiles.postgres.database.azure.com
 - **User**: developergrowwstacks
 - **Database**: processed
@@ -172,6 +192,7 @@ curl -I https://n8n.dev.brisklearning.com
 - **SSL Mode**: require
 
 ### Test Database Connection:
+
 ```bash
 # From VM
 docker exec -it file-processor psql -h scannedfiles.postgres.database.azure.com -U developergrowwstacks -d processed -c "SELECT version();"
@@ -181,6 +202,7 @@ docker exec -it file-processor psql -h scannedfiles.postgres.database.azure.com 
 ```
 
 ### Vector Search Example:
+
 ```bash
 # Search for similar documents
 curl -X GET "https://api.dev.brisklearning.com/search?query=contract%20terms&limit=5"
@@ -189,6 +211,7 @@ curl -X GET "https://api.dev.brisklearning.com/search?query=contract%20terms&lim
 ## File Processing Workflow
 
 ### 1. File Upload via Web Interface:
+
 - Visit https://dev.brisklearning.com
 - Use file upload form
 - Files are scanned with ClamAV
@@ -196,17 +219,19 @@ curl -X GET "https://api.dev.brisklearning.com/search?query=contract%20terms&lim
 - Stored in PostgreSQL with pgvector
 
 ### 2. Form Data Processing:
+
 - Submit data via web form
 - Text is converted to embeddings
 - Stored in same PostgreSQL database
 - Searchable via vector similarity
 
 ### 3. API Integration:
+
 ```bash
 # Upload file via API
 curl -X POST -F "file=@document.pdf" -F "category=contract" https://api.dev.brisklearning.com/upload
 
-# Submit form data via API  
+# Submit form data via API
 curl -X POST -F "organization=TestOrg" -F "email=test@example.com" -F "description=Test data" https://api.dev.brisklearning.com/form/submit
 ```
 
@@ -215,16 +240,19 @@ curl -X POST -F "organization=TestOrg" -F "email=test@example.com" -F "descripti
 ### Common Issues:
 
 1. **SSL Certificates Not Working**:
+
    - Verify DNS records point to VM IP
    - Wait 5-10 minutes for Let's Encrypt
    - Check Caddy logs: `docker logs caddy`
 
 2. **Database Connection Issues**:
+
    - Verify credentials in Key Vault
    - Test connection from VM: `psql -h scannedfiles.postgres.database.azure.com -U developergrowwstacks -d processed`
    - Check firewall rules on PostgreSQL server
 
 3. **Services Not Starting**:
+
    - Check cloud-init logs: `sudo tail -f /var/log/cloud-init-output.log`
    - Verify Docker is running: `sudo systemctl status docker`
    - Check docker-compose: `docker-compose logs`
@@ -235,6 +263,7 @@ curl -X POST -F "organization=TestOrg" -F "email=test@example.com" -F "descripti
    - Check shared directories: `ls -la /home/azureuser/shared-files/`
 
 ### Monitoring Commands:
+
 ```bash
 # Check all services
 docker ps
@@ -261,13 +290,15 @@ tail -f /home/azureuser/logs/caddy/access.log
 ## Cost Estimation
 
 ### Development: ~$180/month
+
 - VM: Standard_D2s_v3 (~$70/month)
 - Storage: Standard LRS (~$20/month)
 - Key Vault: (~$5/month)
 - Network: (~$10/month)
 - External PostgreSQL: (existing, no additional cost)
 
-### Production: ~$350/month  
+### Production: ~$350/month
+
 - VM: Standard_D8s_v3 (~$280/month)
 - Storage: Premium ZRS (~$40/month)
 - Key Vault: (~$10/month)

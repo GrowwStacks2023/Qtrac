@@ -271,7 +271,7 @@ jobs:
         run: |
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
-          RG="palash"
+          RG="arslan"
           
           echo "Phase 1: Cleaning up VMs and compute resources..."
           
@@ -287,7 +287,7 @@ jobs:
         run: |
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
-          RG="palash"
+          RG="arslan"
           
           echo "Phase 2: Cleaning up Network Interface Cards..."
           
@@ -303,7 +303,7 @@ jobs:
         run: |
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
-          RG="palash"
+          RG="arslan"
           
           echo "Phase 3: Cleaning up Public IPs and NSG associations..."
           
@@ -326,7 +326,7 @@ jobs:
         run: |
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
-          RG="palash"
+          RG="arslan"
           
           echo "Phase 4: Cleaning up Network Security Groups..."
           
@@ -339,7 +339,7 @@ jobs:
         run: |
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
-          RG="palash"
+          RG="arslan"
           
           echo "Phase 5: Cleaning up Virtual Networks and Subnets..."
           
@@ -357,7 +357,7 @@ jobs:
         run: |
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
-          RG="palash"
+          RG="arslan"
           
           echo "Phase 6: Cleaning up Storage Accounts..."
           
@@ -371,7 +371,7 @@ jobs:
         run: |
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
-          RG="palash"
+          RG="arslan"
           
           echo "Phase 7: Cleaning up Key Vaults..."
           
@@ -393,7 +393,7 @@ jobs:
         run: |
           ENV="${{ needs.detect-environment.outputs.target-environment }}"
           VERSION="${{ needs.detect-environment.outputs.deployment-version }}"
-          RG="palash"
+          RG="arslan"
           
           echo "Verifying cleanup completion..."
           echo "Remaining resources in resource group:"

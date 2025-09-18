@@ -2,7 +2,7 @@
 environment = "prod"
 project_name = "brisklearning"
 location = "centralindia"
-resource_group_name = "palash"
+resource_group_name = "arslan"
 
 # VM Configuration
 vm_size = "Standard_D8s_v3"  # Large size for production

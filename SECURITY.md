@@ -21,6 +21,7 @@ az keyvault secret set \
 ```
 
 **Updated Terraform Configuration**:
+
 ```hcl
 # In main.tf, add this data source:
 data "azurerm_key_vault_secret" "existing_postgres_password" {
@@ -35,6 +36,7 @@ postgres_password = data.azurerm_key_vault_secret.existing_postgres_password.val
 ### 2. Environment Variable Security
 
 **Replace hardcoded credentials in cloud-init.yml**:
+
 ```yaml
 # BEFORE (insecure):
 PGPASSWORD=palash2003@
@@ -46,10 +48,11 @@ PGPASSWORD=$(az keyvault secret show --vault-name ${key_vault_name} --name exist
 ### 3. Network Security Hardening
 
 **Update NSG rules to restrict access**:
+
 ```bash
 # Remove broad SSH access, replace with specific IP
 az network nsg rule update \
-  --resource-group "palash" \
+  --resource-group "arslan" \
   --nsg-name "brisklearning-dev-vm-nsg" \
   --name "SSH" \
   --source-address-prefix "YOUR_PUBLIC_IP/32"
@@ -58,6 +61,7 @@ az network nsg rule update \
 ### 4. SSL Certificate Security
 
 **Ensure certificates are properly configured**:
+
 - Domain must resolve before deployment
 - Email must be valid and monitored
 - Certificates will auto-renew via Caddy
@@ -65,6 +69,7 @@ az network nsg rule update \
 ### 5. Database Connection Security
 
 **Enable SSL and configure proper authentication**:
+
 ```bash
 # Test secure connection
 psql "postgresql://developergrowwstacks:palash2003%40@scannedfiles.postgres.database.azure.com:5432/processed?sslmode=require"
@@ -80,7 +85,7 @@ psql -h scannedfiles.postgres.database.azure.com -U developergrowwstacks -d proc
 ```dns
 # A Records (replace IP_ADDRESS with your VM's public IP)
 dev.brisklearning.com.     300    IN    A    IP_ADDRESS
-test.brisklearning.com.    300    IN    A    IP_ADDRESS  
+test.brisklearning.com.    300    IN    A    IP_ADDRESS
 prod.brisklearning.com.    300    IN    A    IP_ADDRESS
 n8n.dev.brisklearning.com. 300    IN    A    IP_ADDRESS
 n8n.test.brisklearning.com. 300   IN    A    IP_ADDRESS
@@ -94,6 +99,7 @@ brisklearning.com.         300    IN    A    IP_ADDRESS
 ```
 
 ### DNS Configuration Commands:
+
 ```bash
 # After deployment, get the IP address
 VM_IP=$(terraform output -raw vm_public_ip)
@@ -105,12 +111,14 @@ VM_IP=$(terraform output -raw vm_public_ip)
 ## Secure Deployment Checklist
 
 ### Pre-Deployment:
+
 - [ ] Store database password in Key Vault
 - [ ] Configure DNS records
 - [ ] Update terraform.tfvars to remove plain text passwords
 - [ ] Verify Azure service principal permissions
 
 ### Post-Deployment:
+
 - [ ] Change default n8n password
 - [ ] Restrict SSH access to specific IPs
 - [ ] Verify SSL certificates are working
@@ -121,16 +129,19 @@ VM_IP=$(terraform output -raw vm_public_ip)
 ### Environment-Specific Security:
 
 **Development (dev.brisklearning.com)**:
+
 - Basic authentication sufficient
 - Broader network access for testing
 - Non-critical data only
 
 **Test (test.brisklearning.com)**:
+
 - Production-like security
 - Limited access to test team
 - Sanitized production data
 
 **Production (brisklearning.com)**:
+
 - Maximum security settings
 - IP restrictions for admin access
 - Full monitoring and alerting
@@ -139,6 +150,7 @@ VM_IP=$(terraform output -raw vm_public_ip)
 ## Monitoring and Alerting
 
 ### Required Monitoring:
+
 ```bash
 # Set up alerts for:
 # 1. Failed login attempts
@@ -149,6 +161,7 @@ VM_IP=$(terraform output -raw vm_public_ip)
 ```
 
 ### Log Monitoring:
+
 ```bash
 # Monitor these logs:
 tail -f /home/azureuser/logs/caddy/access.log
@@ -160,12 +173,14 @@ docker logs file-processor
 ## Backup and Recovery
 
 ### Database Backup:
+
 ```bash
 # Create automated backup script
 pg_dump "postgresql://developergrowwstacks:palash2003%40@scannedfiles.postgres.database.azure.com:5432/processed" > backup_$(date +%Y%m%d).sql
 ```
 
 ### File Storage Backup:
+
 ```bash
 # Azure Storage has built-in redundancy
 # Configure additional backups for critical files

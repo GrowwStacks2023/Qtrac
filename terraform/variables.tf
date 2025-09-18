@@ -149,3 +149,35 @@ variable "ssl_email" {
   description = "Email address for SSL certificate generation"
   type        = string
 }
+variable "postgres_host" {
+  description = "PostgreSQL host"
+  type        = string
+}
+
+variable "postgres_user" {
+  description = "PostgreSQL username"
+  type        = string
+}
+
+variable "postgres_password" {
+  description = "PostgreSQL password"
+  type        = string
+  sensitive   = true
+}
+
+variable "postgres_database" {
+  description = "PostgreSQL database name"  
+  type        = string
+}
+
+variable "postgres_port" {
+  description = "PostgreSQL port"
+  type        = string
+  default     = "5432"
+}
+
+variable "vm_admin_password" {
+  description = "VM admin password"
+  type        = string
+  sensitive   = true
+}

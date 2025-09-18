@@ -199,7 +199,7 @@ jobs:
           
           # List resources before cleanup
           echo "Resources found:"
-          az resource list --resource-group "palash" \
+          az resource list --resource-group "arslan" \
             --query "[?contains(name, 'brisklearning-${ENV}') || contains(name, 'bl${ENV}')].{Name:name, Type:type}" \
             -o table || true
           
@@ -207,30 +207,30 @@ jobs:
           echo "Cleaning up resources..."
           
           # Original naming pattern
-          az vm delete --name "brisklearning-${ENV}-vm" --resource-group "palash" --yes || true
-          az network nic delete --name "brisklearning-${ENV}-vm-nic" --resource-group "palash" || true
-          az network public-ip delete --name "brisklearning-${ENV}-vm-ip" --resource-group "palash" || true
-          az network nsg delete --name "brisklearning-${ENV}-vm-nsg" --resource-group "palash" || true
+          az vm delete --name "brisklearning-${ENV}-vm" --resource-group "arslan" --yes || true
+          az network nic delete --name "brisklearning-${ENV}-vm-nic" --resource-group "arslan" || true
+          az network public-ip delete --name "brisklearning-${ENV}-vm-ip" --resource-group "arslan" || true
+          az network nsg delete --name "brisklearning-${ENV}-vm-nsg" --resource-group "arslan" || true
           az network vnet subnet delete --name "brisklearning-${ENV}-vm-subnet" \
-            --vnet-name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
-          az network vnet delete --name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
-          az keyvault delete --name "brisklearning-${ENV}-kv" --resource-group "palash" || true
+            --vnet-name "brisklearning-${ENV}-vnet" --resource-group "arslan" || true
+          az network vnet delete --name "brisklearning-${ENV}-vnet" --resource-group "arslan" || true
+          az keyvault delete --name "brisklearning-${ENV}-kv" --resource-group "arslan" || true
           az keyvault purge --name "brisklearning-${ENV}-kv" || true
-          az storage account delete --name "brisklearning${ENV}storage" --resource-group "palash" --yes || true
+          az storage account delete --name "brisklearning${ENV}storage" --resource-group "arslan" --yes || true
           
           # New naming pattern (bl + env + version)
           for version in v1 v2 v3; do
             echo "Checking for resources with pattern: bl${ENV}${version}*"
-            az vm delete --name "bl${ENV}${version}vm" --resource-group "palash" --yes || true
-            az network nic delete --name "bl${ENV}${version}nic" --resource-group "palash" || true
-            az network public-ip delete --name "bl${ENV}${version}ip" --resource-group "palash" || true
-            az network nsg delete --name "bl${ENV}${version}nsg" --resource-group "palash" || true
+            az vm delete --name "bl${ENV}${version}vm" --resource-group "arslan" --yes || true
+            az network nic delete --name "bl${ENV}${version}nic" --resource-group "arslan" || true
+            az network public-ip delete --name "bl${ENV}${version}ip" --resource-group "arslan" || true
+            az network nsg delete --name "bl${ENV}${version}nsg" --resource-group "arslan" || true
             az network vnet subnet delete --name "bl${ENV}${version}subnet" \
-              --vnet-name "bl${ENV}${version}vnet" --resource-group "palash" || true
-            az network vnet delete --name "bl${ENV}${version}vnet" --resource-group "palash" || true
-            az keyvault delete --name "bl${ENV}${version}kv" --resource-group "palash" || true
+              --vnet-name "bl${ENV}${version}vnet" --resource-group "arslan" || true
+            az network vnet delete --name "bl${ENV}${version}vnet" --resource-group "arslan" || true
+            az keyvault delete --name "bl${ENV}${version}kv" --resource-group "arslan" || true
             az keyvault purge --name "bl${ENV}${version}kv" || true
-            az storage account delete --name "bl${ENV}${version}storage" --resource-group "palash" --yes || true
+            az storage account delete --name "bl${ENV}${version}storage" --resource-group "arslan" --yes || true
           done
           
           echo "Manual cleanup completed"
@@ -249,33 +249,33 @@ jobs:
           az account set --subscription "$ARM_SUBSCRIPTION_ID"
           
           echo "Searching for resources to clean up..."
-          az resource list --resource-group "palash" \
+          az resource list --resource-group "arslan" \
             --query "[?contains(name, 'brisklearning-${ENV}') || contains(name, 'bl${ENV}')].{Name:name, Type:type}" \
             -o table || true
           
           # Same cleanup logic as above
-          az vm delete --name "brisklearning-${ENV}-vm" --resource-group "palash" --yes || true
-          az network nic delete --name "brisklearning-${ENV}-vm-nic" --resource-group "palash" || true
-          az network public-ip delete --name "brisklearning-${ENV}-vm-ip" --resource-group "palash" || true
-          az network nsg delete --name "brisklearning-${ENV}-vm-nsg" --resource-group "palash" || true
+          az vm delete --name "brisklearning-${ENV}-vm" --resource-group "arslan" --yes || true
+          az network nic delete --name "brisklearning-${ENV}-vm-nic" --resource-group "arslan" || true
+          az network public-ip delete --name "brisklearning-${ENV}-vm-ip" --resource-group "arslan" || true
+          az network nsg delete --name "brisklearning-${ENV}-vm-nsg" --resource-group "arslan" || true
           az network vnet subnet delete --name "brisklearning-${ENV}-vm-subnet" \
-            --vnet-name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
-          az network vnet delete --name "brisklearning-${ENV}-vnet" --resource-group "palash" || true
-          az keyvault delete --name "brisklearning-${ENV}-kv" --resource-group "palash" || true
+            --vnet-name "brisklearning-${ENV}-vnet" --resource-group "arslan" || true
+          az network vnet delete --name "brisklearning-${ENV}-vnet" --resource-group "arslan" || true
+          az keyvault delete --name "brisklearning-${ENV}-kv" --resource-group "arslan" || true
           az keyvault purge --name "brisklearning-${ENV}-kv" || true
-          az storage account delete --name "brisklearning${ENV}storage" --resource-group "palash" --yes || true
+          az storage account delete --name "brisklearning${ENV}storage" --resource-group "arslan" --yes || true
           
           for version in v1 v2 v3; do
-            az vm delete --name "bl${ENV}${version}vm" --resource-group "palash" --yes || true
-            az network nic delete --name "bl${ENV}${version}nic" --resource-group "palash" || true
-            az network public-ip delete --name "bl${ENV}${version}ip" --resource-group "palash" || true
-            az network nsg delete --name "bl${ENV}${version}nsg" --resource-group "palash" || true
+            az vm delete --name "bl${ENV}${version}vm" --resource-group "arslan" --yes || true
+            az network nic delete --name "bl${ENV}${version}nic" --resource-group "arslan" || true
+            az network public-ip delete --name "bl${ENV}${version}ip" --resource-group "arslan" || true
+            az network nsg delete --name "bl${ENV}${version}nsg" --resource-group "arslan" || true
             az network vnet subnet delete --name "bl${ENV}${version}subnet" \
-              --vnet-name "bl${ENV}${version}vnet" --resource-group "palash" || true
-            az network vnet delete --name "bl${ENV}${version}vnet" --resource-group "palash" || true
-            az keyvault delete --name "bl${ENV}${version}kv" --resource-group "palash" || true
+              --vnet-name "bl${ENV}${version}vnet" --resource-group "arslan" || true
+            az network vnet delete --name "bl${ENV}${version}vnet" --resource-group "arslan" || true
+            az keyvault delete --name "bl${ENV}${version}kv" --resource-group "arslan" || true
             az keyvault purge --name "bl${ENV}${version}kv" || true
-            az storage account delete --name "bl${ENV}${version}storage" --resource-group "palash" --yes || true
+            az storage account delete --name "bl${ENV}${version}storage" --resource-group "arslan" --yes || true
           done
           
           # Remove state file even after manual cleanup
